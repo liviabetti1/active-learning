@@ -1,0 +1,40 @@
+# EXP_NAME: 'YOUR_EXPERIMENT_NAME'
+# RNG_SEED: 1
+DATASET:
+  NAME: USAVARS_POP
+  LABEL: POPULATION
+  ROOT_DIR: '/share/usavars'
+  VAL_RATIO: 0.0
+  #AUG_METHOD: 'hflip'
+MODEL:
+  TYPE: ridge
+OPTIM:
+  CV: true
+  ALPHAS: #roughly logspace
+    - 1.0e-08
+    - 3.5e-07
+    - 1.5e-05
+    - 4.5e-04
+    - 0.015
+    - 0.5
+    - 20
+    - 1000
+    - 30000
+    - 1.0e+08
+TRAIN:
+  SPLIT: train
+  EVAL_PERIOD: 2
+TEST:
+  SPLIT: test
+DATA_LOADER:
+  NUM_WORKERS: 4
+CUDNN:
+  BENCHMARK: True
+ACTIVE_LEARNING:
+  #INIT_L_NUM: 0.
+  #BUDGET_SIZE: 10
+  # SAMPLING_FN: 'uncertainty'
+  #MAX_ITER: 1
+  FINE_TUNE: False
+  DELTA_RESOLUTION: 0.05
+  MAX_DELTA: 1.1
