@@ -2,9 +2,11 @@ for label in TC
 do
     for id_path in \
         /home/libe2152/deep-al/usavars/sampled_points_treecover/IDs_clustered_500_counties_10_radius_seed_42.pkl \
-        /home/libe2152/deep-al/usavars/sampled_points_treecover/IDs_density_500_counties_10_radius_seed_42.pkl
+        /home/libe2152/deep-al/usavars/sampled_points_treecover/IDs_density_500_counties_10_radius_seed_42.pkl \
+        /home/libe2152/deep-al/usavars/sampled_points_treecover/IDs_clustered_100_counties_10_radius_seed_42.pkl \
+        /home/libe2152/deep-al/usavars/sampled_points_treecover/IDs_density_100_counties_10_radius_seed_42.pkl
     do
-        for budget in 100 200 300 400 500 1000
+        for budget in $(seq 100 10 500)
         do
             for method in random typiclust inversetypiclust
             do

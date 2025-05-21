@@ -78,6 +78,9 @@ def argparser():
     parser.add_argument('--k_logistic', default=50, type=int)
     parser.add_argument('--a_logistic', default=0.8, type=float)
 
+    parser.add_argument('--initial_set_str', default=None, type=str)
+    parser.add_argument('--cost_path', default=None, type=str)
+
     return parser
 
 
@@ -89,7 +92,7 @@ def is_eval_epoch(cur_epoch):
     )
 
 
-def main(cfg):
+def main(cfg, cost_path=None):
     # Setting up GPU args
     use_cuda = (cfg.NUM_GPUS > 0) and torch.cuda.is_available() and cfg.MODEL.TYPE != 'ridge'
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -109,10 +112,28 @@ def main(cfg):
     if not os.path.exists(cfg.OUT_DIR):
         os.mkdir(cfg.OUT_DIR)
     # Create "DATASET/MODEL TYPE" specific directory
-    dataset_out_dir = os.path.join(cfg.OUT_DIR, cfg.DATASET.NAME, cfg.MODEL.TYPE)
 
-    if cfg.ID_PATH is not None:
-        dataset_out_dir = os.path.join(dataset_out_dir, os.path.basename(cfg.ID_PATH)[:-4])
+    #maybe put this somewhere else
+    # Mapping for readability
+    label_mapping = {
+        "POP": "population",
+        "TC": "treecover",
+        # Add more if needed
+    }
+
+    # Split the dataset name
+    dataset_parts = cfg.DATASET.NAME.split('_')
+    if len(dataset_parts) == 2:
+        dataset_root = dataset_parts[0]  # e.g., "USAVARS"
+        label_key = dataset_parts[1]     # e.g., "POP"
+        label_name = label_mapping.get(label_key, label_key.lower())
+    else:
+        # Fallback in case it's not in expected format
+        dataset_root = cfg.DATASET.NAME
+        label_name = "unknown"
+
+    # Now construct the path
+    dataset_out_dir = os.path.join(cfg.OUT_DIR, dataset_root, label_name)
 
     if not os.path.exists(dataset_out_dir):
         os.makedirs(dataset_out_dir)
@@ -123,11 +144,11 @@ def main(cfg):
         now = datetime.now()
         exp_dir = f'{now.year}_{now.month}_{now.day}_{now.hour:02}{now.minute:02}{now.second:02}_{now.microsecond}'
     else:
-        exp_dir = cfg.EXP_NAME
+        exp_dir = f'{cfg.INITIAL_SET.STR}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}'
 
     exp_dir = os.path.join(dataset_out_dir, exp_dir)
     if not os.path.exists(exp_dir):
-        os.mkdir(exp_dir)
+        os.makedirs(exp_dir, exist_ok=True)
         print("Experiment Directory is {}.\n".format(exp_dir))
     else:
         print("Experiment Directory Already Exists: {}. Reusing it may lead to loss of old logs in the directory.\n".format(exp_dir))
@@ -252,6 +273,10 @@ def main(cfg):
 
             model = pipeline
             model.fit(X_train, y_train)
+
+            best_alpha = model.named_steps['ridgecv'].alpha_
+            print(f"Best alpha: {best_alpha}")
+
             r2 = model.score(X_test, y_test)
 
             print("Test Accuracy: {}.\n".format(round(r2, 4)))
@@ -302,7 +327,7 @@ def main(cfg):
             clf_model = cu.load_checkpoint(checkpoint_file, clf_model)
         else:
             clf_model = model
-        activeSet, new_uSet = al_obj.sample_from_uSet(clf_model, lSet, uSet, train_data)
+        activeSet, new_uSet = al_obj.sample_from_uSet(clf_model, lSet, uSet, train_data, cost_path=cost_path)
 
         # Save current lSet, new_uSet and activeSet in the episode directory
         data_obj.saveSets(lSet, uSet, activeSet, cfg.EPISODE_DIR)
@@ -674,12 +699,15 @@ if __name__ == "__main__":
     cfg.EXP_NAME = args.exp_name
     cfg.ACTIVE_LEARNING.SAMPLING_FN = args.al
     cfg.ACTIVE_LEARNING.BUDGET_SIZE = args.budget
+    cfg.INITIAL_SET.STR = args.initial_set_str
     cfg.ACTIVE_LEARNING.INITIAL_DELTA = args.initial_delta
     cfg.RNG_SEED = args.seed
     cfg.ACTIVE_LEARNING.MAX_ITER = args.max_iter
     cfg.MODEL.LINEAR_FROM_FEATURES = args.linear_from_features
     cfg.ACTIVE_LEARNING.A_LOGISTIC = args.a_logistic
     cfg.ACTIVE_LEARNING.K_LOGISTIC = args.k_logistic
+
+    cost_path = args.cost_path
 
     cfg.ID_PATH = args.id_path
     if cfg.ID_PATH is not None:
@@ -692,4 +720,4 @@ if __name__ == "__main__":
         cfg.LSET_IDS = args.from_ids
         cfg.INIT_L_NUM = args.initial_size
 
-    main(cfg)
+    main(cfg, cost_path)

@@ -17,7 +17,7 @@ class ActiveLearning:
         self.sampler = Sampling(dataObj=dataObj,cfg=cfg)
         self.cfg = cfg
         
-    def sample_from_uSet(self, clf_model, lSet, uSet, trainDataset, supportingModels=None):
+    def sample_from_uSet(self, clf_model, lSet, uSet, trainDataset, supportingModels=None, cost_path=None):
         """
         Sample from uSet using cfg.ACTIVE_LEARNING.SAMPLING_FN.
 
@@ -120,6 +120,11 @@ class ActiveLearning:
             # Do active sampling
             activeSet, uSet = adv_sampler.sample_for_labeling(vae=vae, discriminator=disc, \
                                 unlabeled_dataloader=uSet_loader, uSet=uSet)
+            
+        elif self.cfg.ACTIVE_LEARNING.SAMPLING_FN.startswith("greedycost"):
+            from .greedy_cost import GreedyCost
+            gc = GreedyCost(self.cfg, lSet, uSet, budgetSize=self.cfg.ACTIVE_LEARNING.BUDGET_SIZE, cost_path=cost_path)
+            activeSet, uSet = gc.select_samples()
         else:
             print(f"{self.cfg.ACTIVE_LEARNING.SAMPLING_FN} is either not implemented or there is some spelling mistake.")
             raise NotImplementedError

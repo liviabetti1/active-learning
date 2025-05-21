@@ -238,6 +238,12 @@ _C.DATASET.AUG_METHOD = 'hflip'
 # Accepted Datasets
 _C.DATASET.ACCEPTED = ['MNIST','SVHN','CIFAR10','CIFAR100','TINYIMAGENET', 'IMBALANCED_CIFAR10', 'IMBALANCED_CIFAR100', 'IMAGENET50', 'IMAGENET100', 'IMAGENET200', 'USAVARS_POP', 'USAVARS_TC', 'USAVARS_EL']
 
+# #-------------------------------------------------------------------------------#
+# #  INITIAL SET options
+# #-------------------------------------------------------------------------------#
+_C.INITIAL_SET = CN()
+_C.INITIAL_SET.STR = None
+
 def assert_cfg():
     """Checks config values invariants."""
     assert not _C.OPTIM.STEPS or _C.OPTIM.STEPS[0] == 0, \
