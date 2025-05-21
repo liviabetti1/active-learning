@@ -31,7 +31,7 @@ scratch*
 *.out
 
 output/
-output copy/
+output_old/
 *.ipynb_checkpoints/
 data/
 scan/results/
@@ -43,3 +43,7 @@ data/
 scan/
 
 deep-al/plotting/plots
+
+usavars/
+
+results_old/

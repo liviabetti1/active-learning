@@ -144,7 +144,7 @@ def main(cfg, cost_path=None):
         now = datetime.now()
         exp_dir = f'{now.year}_{now.month}_{now.day}_{now.hour:02}{now.minute:02}{now.second:02}_{now.microsecond}'
     else:
-        exp_dir = f'{cfg.INITIAL_SET.STR}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}'
+        exp_dir = f'{cfg.INITIAL_SET.STR}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
 
     exp_dir = os.path.join(dataset_out_dir, exp_dir)
     if not os.path.exists(exp_dir):
