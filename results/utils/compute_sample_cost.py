@@ -4,7 +4,7 @@ import dill
 import numpy as np
 
 # Add the root project directory to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from deep_al.pycls.datasets.usavars import USAVars
 
