@@ -141,7 +141,7 @@ def save_to_csv():
 
     for task in labels:
         for type_str in ['density', 'clustered']:
-            for num_counties in [25, 50, 75, 100]:
+            for num_counties in [25, 50, 75, 100, 125, 150, 175, 200]:
                 for radius in [10]:
                     initial_set_str = f'{type_str}_{num_counties}_counties_{radius}_radius'
 
@@ -154,11 +154,11 @@ def save_to_csv():
 
                     script_dir = os.path.dirname(os.path.abspath(__file__))
                     project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
-                    
-                    csv_dir = f'results/csv/{dataset_name}/{task}/{initial_set_str}'
+
+                    csv_dir = os.path.join(project_root, f'results/csv/{dataset_name}/{task}/{initial_set_str}')
                     os.makedirs(csv_dir, exist_ok=True)
 
-                    csv_filepath = os.path.join(project_root, csv_dir, 'results.csv')
+                    csv_filepath = os.path.join(csv_dir, 'results.csv')
 
 
                     header = ['Method', 'Seed', 'Initial Set Size', 'Initial Test R2', 'Budget', 'Test R2']

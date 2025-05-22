@@ -1,8 +1,10 @@
+import os
 import re
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
+import matplotlib.image as mpimg
 
 sns.set_theme(style="whitegrid", context="talk", font_scale=1.1)
 
@@ -19,6 +21,8 @@ def nice_initial_set_desc(desc):
     match2 = re.match(r'IDs_(\d+)_([a-zA-Z]+)_(\d+)([a-zA-Z0-9]+)_radius_seed_(\d+)', desc)
     # Match description like 'IDs_clustered_500_counties_10_radius_seed_42'
     match3 = re.match(r'IDs_([a-zA-Z]+)_(\d+)_([a-zA-Z]+)_(\d+)_radius_seed_(\d+)', desc)
+    # Match 'clustered|density_num_counties_num_radis
+    match4 = re.match(r'(clustered|density)_(\d+)_([a-zA-Z]+)_(\d+)_radius', desc)
 
     if match1:
         count, region, number, unit, seed = match1.groups()
@@ -29,169 +33,94 @@ def nice_initial_set_desc(desc):
     elif match3:
         type_str, count, region, radius, seed = match3.groups()
         return f"{type_str} {count} {region.capitalize()}, {radius} km radius [Seed {seed}]"
+    elif match4:
+        type_str, count, region, radius = match4.groups()
+        return f"{type_str} {count} {region.capitalize()}, {radius} km radius"
 
     return desc
 
-def nice_label_name(label):
-    """Map label codes to human-readable names."""
-    mapping = {
-        "TC": "Tree Cover",
-        "POP": "Population",
-    }
-    return mapping.get(label, label)
-
-def plot_initial_final_r2_comparison(
-    csv_path,
-    label="TC",
-    budget=100,
-    init_set_desc="IDs_500_centers_5000m_radius_seed_42",
-    save_path=None,
-    ylim=(0.7, 0.88)
-):
-    df = pd.read_csv(csv_path)
-
-    # Filter for specific conditions
-    subset = df[
-        (df["Label"] == label) &
-        (df["Budget"] == budget) &
-        (df["Initial Set Description"] == init_set_desc)
-    ]
-
-    if subset.empty:
-        raise ValueError("Filtered DataFrame is empty. Check your inputs.")
-
-    methods = subset["Method"].unique()
-    plot_df = pd.DataFrame()
-
-    for method in methods:
-        method_df = subset[subset["Method"] == method]
-        initial_r2 = method_df["Initial Test R2"].iloc[0]
-        final_r2_values = method_df.groupby("Seed")["Test R2"].max()
-
-        plot_df = pd.concat([plot_df, pd.DataFrame({
-            "Method": [method, method],
-            "Stage": ["Initial", "Final"],
-            "Test R2": [initial_r2, final_r2_values.mean()],
-            "Std": [0, final_r2_values.std()]
-        })], ignore_index=True)
-
-    plt.figure(figsize=(8, 6))
-    ax = sns.barplot(data=plot_df, x="Method", y="Test R2", hue="Stage", palette="Set2")
-
-    # Optional error bars
-    for i, bar in enumerate(ax.patches):
-        std = plot_df["Std"].iloc[i]
-        if std > 0:
-            ax.errorbar(
-                bar.get_x() + bar.get_width() / 2,
-                bar.get_height(),
-                yerr=std,
-                fmt='none',
-                c='black',
-                capsize=4
-            )
-
-    plt.title(f"Initial vs Final Test R²\nLabel = {label}, Budget = {budget}", fontsize=16)
-    plt.ylim(*ylim)
-    plt.xlabel("Method", fontsize=14)
-    plt.ylabel("Test R²", fontsize=14)
-    plt.legend(title="Stage")
-    plt.tight_layout()
-
-    if save_path is None:
-        safe_desc = init_set_desc.replace("/", "_").replace(" ", "_")
-        save_path = Path(f"initial_final_r2_{label}_{safe_desc}.png")
-
-    plt.savefig(save_path)
-    plt.close()
-
-
 def plot_r2_vs_budget(
     csv_path,
-    label="TC",
-    init_set_desc="IDs_500_centers_5000m_radius_seed_42",
+    label,
+    init_set_str,
+    save_path,
     methods_to_include=None,
-    save_path=None,
-    ylim=(0.7, 0.88)
+    log=True,
+    jitter=True
 ):
     df = pd.read_csv(csv_path)
-
-    # Filter by label and initial set
-    subset = df[
-        (df["Label"] == label) &
-        (df["Initial Set Description"] == init_set_desc)
-    ]
 
     if methods_to_include:
         subset = subset[subset["Method"].isin(methods_to_include)]
 
-    if subset.empty:
-        raise ValueError("Filtered DataFrame is empty. Check your inputs.")
-
-    # Handle ensemble_variance: only keep seed 1
-    ensemble_df = subset[(subset["Method"] == "ensemble_variance")]
-    other_df = subset[subset["Method"] != "ensemble_variance"]
-
-    # Group and aggregate separately
-    grouped_other = other_df.groupby(["Method", "Budget"])["Test R2"]
-    r2_mean_other = grouped_other.mean().reset_index(name="Mean R2")
-    r2_std_other = grouped_other.std().reset_index(name="Std R2")
-
-    ensemble_df = ensemble_df.rename(columns={"Test R2": "Mean R2"})
-    ensemble_df["Std R2"] = 0.0  # No std since only one seed
-
-    # Keep only necessary columns
-    ensemble_df = ensemble_df[["Method", "Budget", "Mean R2", "Std R2"]]
+   # Group and aggregate separately
+    grouped= df.groupby(["Method", "Budget", "Initial Test R2"])["Test R2"]
+    r2_mean= grouped.mean().reset_index(name="Mean R2")
+    r2_std = grouped.std().reset_index(name="Std R2")
 
     # Combine
-    plot_df = pd.concat([r2_mean_other.merge(r2_std_other, on=["Method", "Budget"]), ensemble_df], ignore_index=True)
+    plot_df = r2_mean.merge(r2_std, on=["Method", "Budget", "Initial Test R2"])
 
-    initial_test_r2_df = subset[["Method", "Initial Test R2"]].copy()
-    initial_test_r2_df["Budget"] = 0
-    initial_test_r2_df["Std R2"] = 0.0  # No std for Initial Test R²
-    initial_test_r2_df = initial_test_r2_df.rename(columns={"Initial Test R2": "Mean R2"})
-    
-    # Add this to the plot dataframe
-    plot_df = pd.concat([plot_df, initial_test_r2_df], ignore_index=True)
+    if not log: #budget 0 won't show up on log scale
+        # Create new rows for Budget=0 with Initial Test R2 values
+        methods = plot_df["Method"].unique()
+        new_rows = []
+        for method in methods:
+            initial_r2_value = plot_df["Initial Test R2"].dropna().iloc[0] #just take any bc they're all the same
+            if initial_r2_value is not None:
+                new_rows.append({
+                    "Method": method,
+                    "Budget": 0,
+                    "Mean R2": initial_r2_value,
+                    "Std R2": 0,  # Std R2 at 0 budget assumed 0 or NaN
+                    "Initial Test R2": initial_r2_value,  # if this column exists
+                })
+        plot_df = pd.concat([plot_df, pd.DataFrame(new_rows)], ignore_index=True)
 
-    method_order = ["random", "typiclust", "inversetypiclust", "ensemble_variance"]
+    method_order = ["random", "typiclust", "inversetypiclust"]
     plot_df["Method"] = pd.Categorical(plot_df["Method"], categories=method_order, ordered=True)
     plot_df = plot_df.sort_values(by=["Method", "Budget"])
 
+    jitter_strength = 0.03
+    Budget_str = "Budget"
+    if jitter:
+        method_to_jitter = {
+            method: i * jitter_strength - jitter_strength for i, method in enumerate(plot_df["Method"].cat.categories)
+        }
+        plot_df["Budget_jittered"] = plot_df.apply(lambda row: row["Budget"] + row['Budget']*method_to_jitter[row["Method"]], axis=1)
+        Budget_str = "Budget_jittered"
+
     # Plotting
     plt.figure(figsize=(12, 7))
-    ax = sns.lineplot(
+    ax = sns.scatterplot(
         data=plot_df,
-        x="Budget",
+        x=Budget_str,
         y="Mean R2",
         hue="Method",
         style="Method",
         markers=True,
-        dashes=False,
         palette="Set1",
-        err_style=None
+        alpha=0.9
     )
+    color_palette = sns.color_palette("Set1")
 
-    #Plot std
-    for method in plot_df["Method"].unique():
+    for method, color in zip(plot_df["Method"].cat.categories, color_palette):
         method_df = plot_df[plot_df["Method"] == method]
-        ax.errorbar(
-            method_df["Budget"],
-            method_df["Mean R2"],
+        plt.errorbar(
+            x=method_df[Budget_str],
+            y=method_df["Mean R2"],
             yerr=method_df["Std R2"],
-            fmt="none",
+            fmt='none',               # No connecting lines or markers
             capsize=4,
-            c="black"
+            elinewidth=1.5,
+            color=color
         )
 
     # Update init set description
-    nice_init_set_desc = nice_initial_set_desc(init_set_desc)
-    if not subset.empty and "Initial Set Size" in subset.columns:
-        init_set_size = subset["Initial Set Size"].iloc[0]
-        nice_init_set_desc += f" (Total: {init_set_size})"
+    nice_init_set_desc = nice_initial_set_desc(init_set_str)
 
     # Adjust title and labels with improved font sizes
-    ax.set_title(f"Test R² vs Budget\nLabel = {nice_label_name(label)}\nInit Set: {nice_init_set_desc}", fontsize=18, fontweight='bold')
+    ax.set_title(f"Test R² vs Budget\nLabel = {label}\nInit Set: {nice_init_set_desc}", fontsize=18, fontweight='bold')
     ax.set_xlabel("Budget", fontsize=15)
     ax.set_ylabel("Test R²", fontsize=15)
 
@@ -202,12 +131,11 @@ def plot_r2_vs_budget(
     #plt.ylim(*ylim)
 
     ax.grid(True)
-    plt.tight_layout()
 
-    # Handle save path
-    if save_path is None:
-        safe_desc = init_set_desc.replace("/", "_").replace(" ", "_")
-        save_path = Path(f"r2_vs_budget_{label}_{safe_desc}.png")
+    if log:
+        ax.set_xscale('log')
+
+    plt.tight_layout()
 
     plt.savefig(save_path, bbox_inches="tight", dpi=300)
     plt.close()
@@ -280,14 +208,62 @@ def plot_r2_vs_sample_cost(
     plt.savefig(save_path, bbox_inches="tight", dpi=300)
     plt.close()
 
-if __name__ == '__main__':
+def plot_r2_grid(base_path_template, type_str, nums):
+    """
+    Loads and displays 4 images in a 2x2 grid from the specified path template.
+    
+    Parameters:
+    - base_path_template (str): File path template with `{num}` as placeholder for county count.
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(14, 8))
+    axes = axes.flatten()
+    
+    for i, num in enumerate(nums):
+        image_path = base_path_template.format(type_str=type_str, num=num)
+        if not os.path.exists(image_path):
+            raise FileNotFoundError(f"Image not found: {image_path}")
+        img = mpimg.imread(image_path)
+        axes[i].imshow(img)
+        axes[i].axis('off')
 
-    for init_set_desc in ["IDs_clustered_500_counties_10_radius_seed_42"]:
-        plot_r2_vs_sample_cost(
-            "log_extracted_data_sorted_clustered_with_cost_1_vs_2_increments.csv",
-            label="TC",
-            init_set_desc=init_set_desc,
-            methods_to_include=None,
-            save_path=None,
-            ylim=(0.7, 0.88)
-        )
+    plt.tight_layout(pad=0.5)
+    base_dir = os.path.dirname(image_path)
+    parent_dir = os.path.dirname(base_dir)
+    plt.savefig(os.path.join(parent_dir, f"{type_str}_combined_{nums}.png"), dpi=300)
+
+
+if __name__ == '__main__':
+    # dataset_name = "USAVARS"
+    # labels = ['treecover', 'population']
+
+    # for task in labels:
+    #     for type_str in ['density', 'clustered']:
+    #         for num_counties in [25, 50, 75, 100, 125, 150, 175, 200]:
+    #             for radius in [10]:
+    #                 initial_set_str = f'{type_str}_{num_counties}_counties_{radius}_radius'
+
+    #                 script_dir = os.path.dirname(os.path.abspath(__file__))
+    #                 project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+
+    #                 csv_dir = os.path.join(project_root, f'results/csv/{dataset_name}/{task}/{initial_set_str}')
+    #                 plot_dir = os.path.join(project_root, f'results/plots/{dataset_name}/{task}/{initial_set_str}')
+    #                 os.makedirs(plot_dir, exist_ok=True)
+
+    #                 csv_filepath = os.path.join(csv_dir, 'results.csv')
+    #                 plot_filepath = os.path.join(plot_dir, 'R2 vs budget.png')
+
+    #                 if not os.path.exists(csv_filepath):
+    #                     print(f"{csv_filepath} does not exist.")
+    #                     continue
+
+    #                 plot_r2_vs_budget(
+    #                     csv_filepath,
+    #                     task,
+    #                     initial_set_str,
+    #                     plot_filepath,
+    #                     methods_to_include=None,
+    #                 )
+    base_path_template = '/home/libe2152/deep-al/results/plots/USAVARS/population/{type_str}_{num}_counties_10_radius/R2 vs budget.png'
+    for type_str in ['density', 'clustered']:
+        plot_r2_grid(base_path_template, type_str, [25, 50, 75, 100])
+        plot_r2_grid(base_path_template, type_str, [125, 150, 175, 200])

@@ -2,13 +2,13 @@ for label in POP
 do
     for type in density clustered
     do
-        for counties in 25 50 75 100
+        for counties in 125 150 175 200 100 75 50 25
         do
             for radius in 10
             do
                 initial_set_str="${type}_${counties}_counties_${radius}_radius"
                 id_path="/home/libe2152/deep-al/usavars/sampled_points_population/${type}/IDs_${counties}_counties_10_radius_seed_42.pkl"
-                for budget in 10 100 1000
+                for budget in $(seq 20 10 90)
                 do
                     for method in random typiclust inversetypiclust
                     do
