@@ -1,5 +1,6 @@
 import os
 import re
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -40,18 +41,20 @@ def nice_initial_set_desc(desc):
     return desc
 
 def plot_r2_vs_budget(
-    csv_path,
+    df,
     label,
     init_set_str,
     save_path,
+    budget_bound=np.inf,
     methods_to_include=None,
     log=True,
     jitter=True
 ):
-    df = pd.read_csv(csv_path)
 
     if methods_to_include:
-        subset = subset[subset["Method"].isin(methods_to_include)]
+        df = df[df["Method"].isin(methods_to_include)]
+
+    df = df[df['Budget'] <= budget_bound]
 
    # Group and aggregate separately
     grouped= df.groupby(["Method", "Budget", "Initial Test R2"])["Test R2"]
@@ -128,7 +131,126 @@ def plot_r2_vs_budget(
     ax.legend(title="Methods", loc='upper left', fontsize=12)
 
     # Apply y-limits if specified
-    #plt.ylim(*ylim)
+    # plt.ylim(0.1, 0.5)
+
+    ax.grid(True)
+
+    if log:
+        ax.set_xscale('log')
+
+    plt.tight_layout()
+
+    plt.savefig(save_path, bbox_inches="tight", dpi=300)
+    plt.close()
+
+def plot_r2_vs_num_samples(
+    df_list,
+    label,
+    init_set_str,
+    save_path,
+    budget_bound=np.inf,
+    methods_to_include=None,
+    log=False,
+    jitter=True
+):
+
+    plot_df_list = []
+
+    for df in df_list:
+        if methods_to_include:
+            df = df[df["Method"].isin(methods_to_include)]
+
+        df = df[df['Budget'] <= budget_bound]
+
+        # Group and aggregate separately
+        grouped= df.groupby(["Method", "Budget", "Initial Test R2", "Initial Set Size"])["Test R2"]
+        r2_mean= grouped.mean().reset_index(name="Mean R2")
+        r2_std = grouped.std().reset_index(name="Std R2")
+
+        # Combine
+        plot_df = r2_mean.merge(r2_std, on=["Method", "Budget", "Initial Test R2", "Initial Set Size"])
+
+        if not log: #budget 0 won't show up on log scale
+            # Create new rows for Budget=0 with Initial Test R2 values
+            methods = plot_df["Method"].unique()
+            new_rows = []
+            for method in methods:
+                initial_r2_value = plot_df["Initial Test R2"].dropna().iloc[0] #just take any bc they're all the same
+                initial_set_size = plot_df["Initial Set Size"].dropna().iloc[0]
+                if initial_r2_value is not None:
+                    new_rows.append({
+                        "Method": method,
+                        "Budget": 0,
+                        "Mean R2": initial_r2_value,
+                        "Std R2": 0,  # Std R2 at 0 budget assumed 0 or NaN
+                        "Initial Test R2": initial_r2_value,  # if this column exists
+                        "Initial Set Size": initial_set_size
+                    })
+            plot_df = pd.concat([plot_df, pd.DataFrame(new_rows)], ignore_index=True)
+
+        method_order = ["random", "typiclust", "inversetypiclust"]
+        plot_df["Method"] = pd.Categorical(plot_df["Method"], categories=method_order, ordered=True)
+        plot_df = plot_df.sort_values(by=["Method", "Budget"])
+
+        jitter_strength = 0.03
+        Budget_str = "Budget"
+        if jitter:
+            method_to_jitter = {
+                method: i * jitter_strength - jitter_strength for i, method in enumerate(plot_df["Method"].cat.categories)
+            }
+            plot_df["Budget_jittered"] = plot_df.apply(lambda row: row["Budget"] + row['Budget']*method_to_jitter[row["Method"]], axis=1)
+            Budget_str = "Budget_jittered"
+
+        # Plotting
+        plot_df["Num Samples jittered"] = plot_df["Initial Set Size"] + plot_df["Budget_jittered"]
+
+        plot_df_list.append(plot_df)
+
+    plot_df = pd.concat(plot_df_list, ignore_index=True)
+    plt.figure(figsize=(24, 20))
+
+    zero_budget_df = plot_df[plot_df["Budget"] == 0]
+    ax = sns.scatterplot(
+        data=plot_df,
+        x="Num Samples jittered",
+        y="Mean R2",
+        hue="Method",
+        style="Method",
+        markers=True,
+        palette="Set1",
+        alpha=0.9
+    )
+    color_palette = sns.color_palette("Set1")
+    plt.scatter(
+        zero_budget_df["Num Samples jittered"],
+        zero_budget_df["Mean R2"],
+        color="black",
+        marker="x",
+        s=200,  # size of the marker
+    )
+
+    for method, color in zip(plot_df["Method"].cat.categories, color_palette):
+        method_df = plot_df[plot_df["Method"] == method]
+        plt.errorbar(
+            x=method_df["Num Samples jittered"],
+            y=method_df["Mean R2"],
+            yerr=method_df["Std R2"],
+            fmt='none',               # No connecting lines or markers
+            capsize=4,
+            elinewidth=1.5,
+            color=color
+        )
+
+    # Adjust title and labels with improved font sizes
+    ax.set_title(f"Test R² vs Num Samples\nLabel = {label}\nInit Set: {init_set_str}", fontsize=18, fontweight='bold')
+    ax.set_xlabel("Number of Samples", fontsize=15)
+    ax.set_ylabel("Test R²", fontsize=15)
+
+    # Adjust legend outside the plot to avoid overlap
+    ax.legend(title="Methods", loc='upper left', fontsize=12)
+
+    # Apply y-limits if specified
+    # plt.ylim(0.1, 0.5)
 
     ax.grid(True)
 
@@ -261,9 +383,62 @@ if __name__ == '__main__':
     #                     task,
     #                     initial_set_str,
     #                     plot_filepath,
+    #                     budget_bound=100,
     #                     methods_to_include=None,
+    #                     log=False
     #                 )
-    base_path_template = '/home/libe2152/deep-al/results/plots/USAVARS/population/{type_str}_{num}_counties_10_radius/R2 vs budget.png'
-    for type_str in ['density', 'clustered']:
-        plot_r2_grid(base_path_template, type_str, [25, 50, 75, 100])
-        plot_r2_grid(base_path_template, type_str, [125, 150, 175, 200])
+    # base_path_template = '/home/libe2152/deep-al/results/plots/USAVARS/population/{type_str}_{num}_counties_10_radius/R2 vs budget.png'
+    # for type_str in ['density', 'clustered']:
+    #     plot_r2_grid(base_path_template, type_str, [25, 50, 75, 100])
+    #     plot_r2_grid(base_path_template, type_str, [125, 150, 175, 200])
+    
+    dataset_name = "USAVARS"
+    labels = ['treecover', 'population']
+
+    for task in labels:
+        for type_str in ['density', 'clustered']:
+            df_list = []
+            for num_counties in [25, 50, 75, 100, 125, 150, 175, 200]:
+                for radius in [10]:
+                    initial_set_str = f'{type_str}_{num_counties}_counties_{radius}_radius'
+
+                    script_dir = os.path.dirname(os.path.abspath(__file__))
+                    project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+
+                    csv_dir = os.path.join(project_root, f'results/csv/{dataset_name}/{task}/{initial_set_str}')
+                    plot_dir = os.path.join(project_root, f'results/plots/{dataset_name}/{task}/{initial_set_str}')
+                    os.makedirs(plot_dir, exist_ok=True)
+
+                    csv_filepath = os.path.join(csv_dir, 'results.csv')
+                    plot_filepath = os.path.join(plot_dir, 'R2 vs budget.png')
+
+                    if not os.path.exists(csv_filepath):
+                        print(f"{csv_filepath} does not exist.")
+                        continue
+
+                    df = pd.read_csv(csv_filepath)
+                    df_list.append(df)
+
+                    plot_r2_vs_budget(
+                        df,
+                        task,
+                        initial_set_str,
+                        plot_filepath,
+                        budget_bound=100,
+                        methods_to_include=None,
+                        log=False
+                    )
+            
+            if len(df_list) == 0:
+                continue
+            plot_filepath = os.path.join(project_root, f"results/plots/{dataset_name}/{task}", f"{type_str}.png")
+
+            plot_r2_vs_num_samples(
+                df_list,
+                task,
+                type_str,
+                plot_filepath,
+                budget_bound=100,
+                methods_to_include=["random"],
+                log=False
+            )
