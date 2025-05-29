@@ -5,7 +5,7 @@ import csv
 
 from compute_sample_cost import compute_total_sample_cost
 
-def get_labeled_set_test_r2(file_path):
+def get_labeled_set_test_r2(file_path, cost_aware=False):
     with open(file_path, 'r') as f:
         log_data = f.read()
 
@@ -26,16 +26,22 @@ def get_labeled_set_test_r2(file_path):
     print(f"Initial Labeled Set size: {initial_labeled_set_size}, Initial Test R²: {initial_test_r2}")
     print(f"Final Labeled Set size: {last_labeled_set_size}, Final Test R²: {last_test_r2}")
 
+    if cost_aware:
+        total_cost = re.findall(r'Total Cost of New Labeled Set: (-?[0-9]*\.?[0-9]+)', log_data)
+        total_cost = float(total_cost[0]) if total_cost else None
+
+        return initial_labeled_set_size, initial_test_r2, last_labeled_set_size, last_test_r2, total_cost
+
     return initial_labeled_set_size, initial_test_r2, last_labeled_set_size, last_test_r2
 
-def iterate_log_files_and_extract_data(dataset_name, task, initial_set_str):
+def iterate_log_files_and_extract_data(dataset_name, task, initial_set_str, cost_aware=False):
     """Iterate through new-style experiment directories and extract relevant data."""
     data_rows = []
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
 
-    log_dir = os.path.join(project_root, 'output', dataset_name, task, initial_set_str)
+    log_dir = os.path.join(project_root, 'output', dataset_name, task, initial_set_str, 'cost_aware') if cost_aware else os.path.join(project_root, 'output', dataset_name, task, initial_set_str)
 
     if not os.path.exists(log_dir):
         print(f"{log_dir} does not exist.")
@@ -53,99 +59,55 @@ def iterate_log_files_and_extract_data(dataset_name, task, initial_set_str):
             parts = file_path.split(os.sep)
 
             try:         
-                method = parts[8].lower()                              # e.g., 'random', 'leverage', etc.
-                budget = int(parts[9].split('_')[1])                   # e.g., 'budget_500' → 500
-                al_seed = int(parts[10].split('_')[1])                  # e.g., 'seed_0' → 0
+                method = parts[9].lower() if cost_aware else parts[8].lower()
+                budget = int(parts[10].split('_')[1]) if cost_aware else int(parts[10].split('_')[1])  
+                al_seed = int(parts[11].split('_')[1]) if cost_aware else int(parts[10].split('_')[1])
             except Exception as e:
+                from IPython import embed; embed()
                 print(f"Skipping path {file_path} due to parse error: {e}")
                 continue
 
             try:
-                initial_labeled_set_size, initial_test_r2, last_labeled_set_size, last_test_r2 = get_labeled_set_test_r2(file_path)
+                if cost_aware:
+                    initial_labeled_set_size, initial_test_r2, last_labeled_set_size, last_test_r2, total_cost = get_labeled_set_test_r2(file_path, cost_aware=cost_aware)
 
-                data_rows.append([
-                    method,
-                    al_seed,
-                    initial_labeled_set_size,
-                    initial_test_r2,
-                    budget,
-                    last_test_r2
-                ])
+                    data_rows.append([
+                        method,
+                        al_seed,
+                        initial_labeled_set_size,
+                        initial_test_r2,
+                        budget,
+                        last_test_r2,
+                        total_cost
+                    ])
+                else:
+                    initial_labeled_set_size, initial_test_r2, last_labeled_set_size, last_test_r2 = get_labeled_set_test_r2(file_path)
+
+                    data_rows.append([
+                        method,
+                        al_seed,
+                        initial_labeled_set_size,
+                        initial_test_r2,
+                        budget,
+                        last_test_r2
+                    ])
             except Exception as e:
                 print(f"Error processing {file_path}: {e}")
-
-    return data_rows
-
-def iterate_log_files_and_extract_data_with_cost(log_dir, cost_path, label):
-    """Iterate through new-style experiment directories and extract relevant data."""
-    data_rows = []
-    
-    for root, dirs, _ in os.walk(log_dir):
-        for dir in dirs:
-            exp_path = os.path.join(root, dir)
-            if not os.path.isdir(exp_path):
-                continue
-
-            # Try to match the expected directory structure
-            parts = os.path.relpath(exp_path, log_dir).split(os.sep)
-            if len(parts) < 4:
-                continue  # Not a valid experiment path
-
-            try:
-                initial_set_desc = parts[0]                            # e.g., 'IDs_clustered_100_counties_10_radius_seed_0'
-                method = parts[1].lower()                              # e.g., 'random', 'leverage', etc.
-                budget = int(parts[2].split('_')[1])                   # e.g., 'budget_500' → 500
-                al_seed = int(parts[3].split('_')[1])                  # e.g., 'seed_0' → 0
-            except Exception as e:
-                print(f"Skipping path {exp_path} due to parse error: {e}")
-                continue
-
-            file_path = os.path.join(exp_path, "stdout.log")
-            if not os.path.isfile(file_path):
-                continue
-
-            try:
-                initial_labeled_set_size, initial_test_r2, last_labeled_set_size, last_test_r2 = get_labeled_set_test_r2(file_path)
-
-                activeset_path = os.path.join(exp_path, "episode_0", "activeSet.npy")
-                if label == 'TC':
-                    full_label = 'treecover'
-                elif label == 'POP':
-                    full_label = 'population'
-                else:
-                    full_label = label.lower()
-
-                sample_cost = compute_total_sample_cost(activeset_path, full_label, cost_path)
-
-                data_rows.append([
-                    'USAVARS',
-                    label,
-                    initial_set_desc,
-                    method,
-                    budget,
-                    al_seed,
-                    initial_labeled_set_size,
-                    initial_test_r2,
-                    last_labeled_set_size,
-                    last_test_r2,
-                    sample_cost
-                ])
-            except Exception as e:
-                print(f"Error processing {exp_path}: {e}")
 
     return data_rows
 
 def save_to_csv():
     dataset_name = "USAVARS"
     labels = ['treecover', 'population']
+    cost_aware = True
 
     for task in labels:
-        for type_str in ['density', 'clustered']:
-            for num_counties in [25, 50, 75, 100, 125, 150, 175, 200]:
+        for type_str in ['density']:
+            for num_counties in [25]:
                 for radius in [10]:
                     initial_set_str = f'{type_str}_{num_counties}_counties_{radius}_radius'
 
-                    data = iterate_log_files_and_extract_data(dataset_name, task, initial_set_str)
+                    data = iterate_log_files_and_extract_data(dataset_name, task, initial_set_str, cost_aware=cost_aware)
                     if data is None:
                         continue
 
@@ -155,13 +117,12 @@ def save_to_csv():
                     script_dir = os.path.dirname(os.path.abspath(__file__))
                     project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
 
-                    csv_dir = os.path.join(project_root, f'results/csv/{dataset_name}/{task}/{initial_set_str}')
+                    csv_dir = os.path.join(project_root, f'results/csv/{dataset_name}/{task}/{initial_set_str}/cost_aware') if cost_aware else os.path.join(project_root, f'results/csv/{dataset_name}/{task}/{initial_set_str}')
                     os.makedirs(csv_dir, exist_ok=True)
 
                     csv_filepath = os.path.join(csv_dir, 'results.csv')
 
-
-                    header = ['Method', 'Seed', 'Initial Set Size', 'Initial Test R2', 'Budget', 'Test R2']
+                    header = ['Method', 'Seed', 'Initial Set Size', 'Initial Test R2', 'Budget', 'Test R2', 'Total Cost'] if cost_aware else ['Method', 'Seed', 'Initial Set Size', 'Initial Test R2', 'Budget', 'Test R2']
 
                     with open(csv_filepath, mode='w', newline='') as file:
                         writer = csv.writer(file)

@@ -471,35 +471,6 @@ class Sampling:
         remainSet = uSet[sorted_idx[budgetSize:]]
         uSetLoader.dataset.no_aug = False
         return activeSet, remainSet
-    
-    def ensemble_variance(self, budgetSize, uSet, reg_models, dataset):
-        """
-        Selects the top 'budgetSize' samples from the unlabeled set based on
-        ensemble prediction variance (a proxy for epistemic uncertainty in regression).
-
-        For more details refer equation 4 in 
-        http://openaccess.thecvf.com/content_cvpr_2018/papers/Beluch_The_Power_of_CVPR_2018_paper.pdf
-        """
-        print("Ensemble variance calculation.")
-        unlabeled_indices = uSet.tolist()
-        X_unlabeled = dataset[unlabeled_indices][0]
-
-        ens_preds = np.zeros((len(unlabeled_indices), len(reg_models)), dtype=float)
-        
-        for i, model in enumerate(reg_models):
-            y_preds = model.predict(X_unlabeled)
-            ens_preds[:, i] = y_preds
-
-        variance = np.var(ens_preds, axis=1, keepdims=True)[:, 0]
-
-        sorted_idx = np.argsort(variance)[::-1]
-        activeSet = sorted_idx[:budgetSize]
-
-        activeSet = uSet[activeSet]
-        remainSet = uSet[sorted_idx[budgetSize:]]
-        print("Found active set.")
-
-        return activeSet, remainSet
 
     def uncertainty(self, budgetSize, lSet, uSet, model, dataset):
 
@@ -934,4 +905,3 @@ class AdversarySampler:
         remainSet = uSet[remainSet]
         unlabeled_dataloader.dataset.no_aug = False
         return activeSet, remainSet
-

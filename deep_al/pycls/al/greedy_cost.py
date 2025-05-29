@@ -52,11 +52,13 @@ class GreedyCost:
         relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
         costs = self.costs[relevant_indices]
 
+        all_indices = np.arange(len(relevant_indices))
         existing_indices = np.arange(len(self.lSet))
+        new_indices = np.setdiff1d(all_indices, existing_indices)
 
         #randomly choose order
         rng = np.random.default_rng(seed=42)
-        perm = rng.permutation(len(costs))
+        perm = rng.permutation(new_indices)
         selected = perm[np.argsort(costs[perm])][:self.budget]
 
         print(f"Total Sample Cost: {np.sum(costs[selected])}")

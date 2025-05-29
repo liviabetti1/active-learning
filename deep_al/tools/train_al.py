@@ -67,6 +67,7 @@ def argparser():
     parser.add_argument('--cfg', dest='cfg_file', help='Config file', required=True, type=str)
     parser.add_argument('--exp-name', help='Experiment Name', required=True, type=str)
     parser.add_argument('--al', help='AL Method', required=True, type=str)
+    parser.add_argument('--cost_aware', help='Whether or not a cost aware method is used', required=False, type=str2bool)
     parser.add_argument('--budget', help='Budget Per Round', required=True, type=int)
     parser.add_argument('--initial_size', help='Size of the initial random labeled set', default=0, type=int)
     parser.add_argument('--id-path', help='IDs for initial set', default=None, type=str)
@@ -79,7 +80,11 @@ def argparser():
     parser.add_argument('--a_logistic', default=0.8, type=float)
 
     parser.add_argument('--initial_set_str', default=None, type=str)
-    parser.add_argument('--cost_path', default=None, type=str)
+    parser.add_argument('--cost_func', default=None, type=str)
+    parser.add_argument('--cost_array_path', default=None, type=str)
+    parser.add_argument('--region_assignment_path', default=None, type=str)
+    parser.add_argument('--labeled_region_cost', default=1, type=int)
+    parser.add_argument('--new_region_cost', default=2, type=int)
 
     return parser
 
@@ -92,7 +97,7 @@ def is_eval_epoch(cur_epoch):
     )
 
 
-def main(cfg, cost_path=None):
+def main(cfg):
     # Setting up GPU args
     use_cuda = (cfg.NUM_GPUS > 0) and torch.cuda.is_available() and cfg.MODEL.TYPE != 'ridge'
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -144,7 +149,10 @@ def main(cfg, cost_path=None):
         now = datetime.now()
         exp_dir = f'{now.year}_{now.month}_{now.day}_{now.hour:02}{now.minute:02}{now.second:02}_{now.microsecond}'
     else:
-        exp_dir = f'{cfg.INITIAL_SET.STR}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
+        if cfg.ACTIVE_LEARNING.COST_AWARE:
+            exp_dir = f'{cfg.INITIAL_SET.STR}/cost_aware/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
+        else:
+            exp_dir = f'{cfg.INITIAL_SET.STR}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
 
     exp_dir = os.path.join(dataset_out_dir, exp_dir)
     if not os.path.exists(exp_dir):
@@ -188,15 +196,13 @@ def main(cfg, cost_path=None):
 
     al_iter = 0
     if len(lSet) == 0:
-        if cfg.ACTIVE_LEARNING.SAMPLING_FN.lower() in ['dcom']:
-            print('Labeled Set is Empty - Create and save the first delta values list')
-            lSet_deltas = [str(cfg.ACTIVE_LEARNING.INITIAL_DELTA)] * cfg.ACTIVE_LEARNING.BUDGET_SIZE
-            cfg.ACTIVE_LEARNING.DELTA_LST = lSet_deltas
-            delta_avg_lst.append(cfg.ACTIVE_LEARNING.INITIAL_DELTA)
-
         print('Labeled Set is Empty - Sampling an Initial Pool')
         al_obj = ActiveLearning(data_obj, cfg)
-        activeSet, new_uSet = al_obj.sample_from_uSet(model, lSet, uSet, train_data)
+
+        if cfg.ACTIVE_LEARNING.COST_AWARE:
+            activeSet, new_uSet, total_cost = al_obj.sample_from_uSet(model, lSet, uSet) #SPECIFY KWARGS HERE
+        else:
+            activeSet, new_uSet = al_obj.sample_from_uSet(model, lSet, uSet, train_data)
         print(f'Initial Pool is {activeSet}')
         # Save current lSet, new_uSet and activeSet in the episode directory
         # data_obj.saveSets(lSet, uSet, activeSet, cfg.EPISODE_DIR)
@@ -327,7 +333,11 @@ def main(cfg, cost_path=None):
             clf_model = cu.load_checkpoint(checkpoint_file, clf_model)
         else:
             clf_model = model
-        activeSet, new_uSet = al_obj.sample_from_uSet(clf_model, lSet, uSet, train_data, cost_path=cost_path)
+        
+        if cfg.ACTIVE_LEARNING.COST_AWARE:
+            activeSet, new_uSet, total_cost = al_obj.sample_from_uSet(model, lSet, uSet) #SPECIFY KWARGS HERE
+        else:
+            activeSet, new_uSet = al_obj.sample_from_uSet(model, lSet, uSet, train_data)
 
         # Save current lSet, new_uSet and activeSet in the episode directory
         data_obj.saveSets(lSet, uSet, activeSet, cfg.EPISODE_DIR)
@@ -343,17 +353,14 @@ def main(cfg, cost_path=None):
 
         print("Active Sampling Complete. After Episode {}:\nNew Labeled Set: {}, New Unlabeled Set: {}, Active Set: {}\n".format(cur_episode, len(lSet), len(uSet), len(activeSet)))
         logger.info("Active Sampling Complete. After Episode {}:\nNew Labeled Set: {}, New Unlabeled Set: {}, Active Set: {}\n".format(cur_episode, len(lSet), len(uSet), len(activeSet)))
+
+        if cfg.ACTIVE_LEARNING.COST_AWARE:
+            print("Total Cost of New Labeled Set: {}".format(total_cost))
+            logger.info("Total Cost of New Labeled Set: {}".format(total_cost))
+
         print("================================\n\n")
         logger.info("================================\n\n")
 
-        # add avg delta to cfg.ACTIVE_LEARNING.DELTA_LST towards the next active sampling
-        if cfg.ACTIVE_LEARNING.SAMPLING_FN.lower() in ['dcom']:
-            delta_lst_float = [np.float(delta) for delta in cfg.ACTIVE_LEARNING.DELTA_LST]
-            next_initial_deltas = [str(round(np.average(delta_lst_float), 2))] * cfg.ACTIVE_LEARNING.BUDGET_SIZE
-            cfg.ACTIVE_LEARNING.DELTA_LST.extend(next_initial_deltas)
-            print("Current delta list: ", cfg.ACTIVE_LEARNING.DELTA_LST)
-            print("Current delta avg list: ", delta_avg_lst)
-            print("Current delta std list: ", delta_std_lst)
         print('Current accuracy values: ', plot_episode_yvalues)
 
         if not cfg.ACTIVE_LEARNING.FINE_TUNE:
@@ -697,6 +704,7 @@ if __name__ == "__main__":
     args = argparser().parse_args()
     cfg.merge_from_file(args.cfg_file)
     cfg.EXP_NAME = args.exp_name
+    cfg.ACTIVE_LEARNING.COST_AWARE = args.cost_aware
     cfg.ACTIVE_LEARNING.SAMPLING_FN = args.al
     cfg.ACTIVE_LEARNING.BUDGET_SIZE = args.budget
     cfg.INITIAL_SET.STR = args.initial_set_str
@@ -707,7 +715,8 @@ if __name__ == "__main__":
     cfg.ACTIVE_LEARNING.A_LOGISTIC = args.a_logistic
     cfg.ACTIVE_LEARNING.K_LOGISTIC = args.k_logistic
 
-    cost_path = args.cost_path
+    cfg.COST.FN = args.cost_func
+    cfg.COST.PATH = args.cost_array_path
 
     cfg.ID_PATH = args.id_path
     if cfg.ID_PATH is not None:
@@ -720,4 +729,15 @@ if __name__ == "__main__":
         cfg.LSET_IDS = args.from_ids
         cfg.INIT_L_NUM = args.initial_size
 
-    main(cfg, cost_path)
+    region_assignment_path = args.region_assignment_path
+
+    if region_assignment_path is not None:
+        with open(region_assignment_path, "rb") as f:
+            loaded_region_assignments = dill.load(f)['assignments']
+
+        cfg.COST.REGION_ASSIGNMENT = loaded_region_assignments
+
+        cfg.COST.LABELED_REGION_COST = args.labeled_region_cost
+        cfg.COST.NEW_REGION_COST = args.new_region_cost
+
+    main(cfg)

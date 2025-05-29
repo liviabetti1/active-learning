@@ -48,57 +48,83 @@ def plot_r2_vs_budget(
     budget_bound=np.inf,
     methods_to_include=None,
     log=True,
-    jitter=True
+    jitter=True,
+    cost_aware=False
 ):
+    if cost_aware:
+        jitter = False
 
     if methods_to_include:
         df = df[df["Method"].isin(methods_to_include)]
 
-    df = df[df['Budget'] <= budget_bound]
+    x_val = "Total Cost" if cost_aware else "Budget"
+    df = df[df[x_val] <= budget_bound]
 
-   # Group and aggregate separately
-    grouped= df.groupby(["Method", "Budget", "Initial Test R2"])["Test R2"]
-    r2_mean= grouped.mean().reset_index(name="Mean R2")
-    r2_std = grouped.std().reset_index(name="Std R2")
+    if cost_aware:
+        # Use raw values directly
+        plot_df = df.copy()
+    else:
+        # Group and aggregate separately
+        grouped = df.groupby(["Method", x_val, "Initial Test R2", "Initial Set Size"])["Test R2"]
+        r2_mean = grouped.mean().reset_index(name="Mean R2")
+        r2_std = grouped.std().reset_index(name="Std R2")
 
-    # Combine
-    plot_df = r2_mean.merge(r2_std, on=["Method", "Budget", "Initial Test R2"])
+        # Combine
+        plot_df = r2_mean.merge(r2_std, on=["Method", x_val, "Initial Test R2", "Initial Set Size"])
 
-    if not log: #budget 0 won't show up on log scale
-        # Create new rows for Budget=0 with Initial Test R2 values
+    if not log:
         methods = plot_df["Method"].unique()
         new_rows = []
         for method in methods:
-            initial_r2_value = plot_df["Initial Test R2"].dropna().iloc[0] #just take any bc they're all the same
-            if initial_r2_value is not None:
-                new_rows.append({
-                    "Method": method,
-                    "Budget": 0,
-                    "Mean R2": initial_r2_value,
-                    "Std R2": 0,  # Std R2 at 0 budget assumed 0 or NaN
-                    "Initial Test R2": initial_r2_value,  # if this column exists
-                })
+            initial_r2_value = plot_df["Initial Test R2"].dropna().iloc[0]  # Assume all same
+            initial_set_size = plot_df["Initial Set Size"].dropna().iloc[0]
+            x = initial_set_size if cost_aware else 0
+            row = {
+                "Method": method,
+                x_val: x,
+                "Initial Test R2": initial_r2_value,
+                "Initial Set Size": initial_set_size,
+            }
+            if cost_aware:
+                row["Test R2"] = initial_r2_value
+            else:
+                row["Mean R2"] = initial_r2_value
+                row["Std R2"] = 0
+            new_rows.append(row)
+
         plot_df = pd.concat([plot_df, pd.DataFrame(new_rows)], ignore_index=True)
 
-    method_order = ["random", "typiclust", "inversetypiclust"]
+    # Method ordering
+    method_order = ["random", "greedycost"] if cost_aware else ["random", "typiclust", "inversetypiclust"]
     plot_df["Method"] = pd.Categorical(plot_df["Method"], categories=method_order, ordered=True)
-    plot_df = plot_df.sort_values(by=["Method", "Budget"])
+    plot_df = plot_df.sort_values(by=["Method", x_val])
 
+    # Jitter setup
     jitter_strength = 0.03
     Budget_str = "Budget"
     if jitter:
         method_to_jitter = {
             method: i * jitter_strength - jitter_strength for i, method in enumerate(plot_df["Method"].cat.categories)
         }
-        plot_df["Budget_jittered"] = plot_df.apply(lambda row: row["Budget"] + row['Budget']*method_to_jitter[row["Method"]], axis=1)
+        plot_df["Budget_jittered"] = plot_df.apply(
+            lambda row: row["Budget"] + row['Budget'] * method_to_jitter[row["Method"]], axis=1
+        )
         Budget_str = "Budget_jittered"
+    x_val = x_val if cost_aware else Budget_str
 
     # Plotting
     plt.figure(figsize=(12, 7))
+    sns.set(style="whitegrid")
+
+    if cost_aware:
+        y_val = "Test R2"
+    else:
+        y_val = "Mean R2"
+
     ax = sns.scatterplot(
         data=plot_df,
-        x=Budget_str,
-        y="Mean R2",
+        x=x_val,
+        y=y_val,
         hue="Method",
         style="Method",
         markers=True,
@@ -107,24 +133,25 @@ def plot_r2_vs_budget(
     )
     color_palette = sns.color_palette("Set1")
 
-    for method, color in zip(plot_df["Method"].cat.categories, color_palette):
-        method_df = plot_df[plot_df["Method"] == method]
-        plt.errorbar(
-            x=method_df[Budget_str],
-            y=method_df["Mean R2"],
-            yerr=method_df["Std R2"],
-            fmt='none',               # No connecting lines or markers
-            capsize=4,
-            elinewidth=1.5,
-            color=color
-        )
+    if not cost_aware:
+        for method, color in zip(plot_df["Method"].cat.categories, color_palette):
+            method_df = plot_df[plot_df["Method"] == method]
+            plt.errorbar(
+                x=method_df[x_val],
+                y=method_df["Mean R2"],
+                yerr=method_df["Std R2"],
+                fmt='none',               # No connecting lines or markers
+                capsize=4,
+                elinewidth=1.5,
+                color=color
+            )
 
     # Update init set description
     nice_init_set_desc = nice_initial_set_desc(init_set_str)
 
     # Adjust title and labels with improved font sizes
     ax.set_title(f"Test R² vs Budget\nLabel = {label}\nInit Set: {nice_init_set_desc}", fontsize=18, fontweight='bold')
-    ax.set_xlabel("Budget", fontsize=15)
+    ax.set_xlabel(x_val, fontsize=15)
     ax.set_ylabel("Test R²", fontsize=15)
 
     # Adjust legend outside the plot to avoid overlap
@@ -355,38 +382,6 @@ def plot_r2_grid(base_path_template, type_str, nums):
 
 
 if __name__ == '__main__':
-    # dataset_name = "USAVARS"
-    # labels = ['treecover', 'population']
-
-    # for task in labels:
-    #     for type_str in ['density', 'clustered']:
-    #         for num_counties in [25, 50, 75, 100, 125, 150, 175, 200]:
-    #             for radius in [10]:
-    #                 initial_set_str = f'{type_str}_{num_counties}_counties_{radius}_radius'
-
-    #                 script_dir = os.path.dirname(os.path.abspath(__file__))
-    #                 project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
-
-    #                 csv_dir = os.path.join(project_root, f'results/csv/{dataset_name}/{task}/{initial_set_str}')
-    #                 plot_dir = os.path.join(project_root, f'results/plots/{dataset_name}/{task}/{initial_set_str}')
-    #                 os.makedirs(plot_dir, exist_ok=True)
-
-    #                 csv_filepath = os.path.join(csv_dir, 'results.csv')
-    #                 plot_filepath = os.path.join(plot_dir, 'R2 vs budget.png')
-
-    #                 if not os.path.exists(csv_filepath):
-    #                     print(f"{csv_filepath} does not exist.")
-    #                     continue
-
-    #                 plot_r2_vs_budget(
-    #                     csv_filepath,
-    #                     task,
-    #                     initial_set_str,
-    #                     plot_filepath,
-    #                     budget_bound=100,
-    #                     methods_to_include=None,
-    #                     log=False
-    #                 )
     # base_path_template = '/home/libe2152/deep-al/results/plots/USAVARS/population/{type_str}_{num}_counties_10_radius/R2 vs budget.png'
     # for type_str in ['density', 'clustered']:
     #     plot_r2_grid(base_path_template, type_str, [25, 50, 75, 100])
@@ -394,19 +389,20 @@ if __name__ == '__main__':
     
     dataset_name = "USAVARS"
     labels = ['treecover', 'population']
+    cost_aware=True
 
     for task in labels:
-        for type_str in ['density', 'clustered']:
+        for type_str in ['density']:
             df_list = []
-            for num_counties in [25, 50, 75, 100, 125, 150, 175, 200]:
+            for num_counties in [25]:
                 for radius in [10]:
                     initial_set_str = f'{type_str}_{num_counties}_counties_{radius}_radius'
 
                     script_dir = os.path.dirname(os.path.abspath(__file__))
                     project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
 
-                    csv_dir = os.path.join(project_root, f'results/csv/{dataset_name}/{task}/{initial_set_str}')
-                    plot_dir = os.path.join(project_root, f'results/plots/{dataset_name}/{task}/{initial_set_str}')
+                    csv_dir = os.path.join(project_root, f'results/csv/{dataset_name}/{task}/{initial_set_str}/cost_aware') if cost_aware else os.path.join(project_root, f'results/csv/{dataset_name}/{task}/{initial_set_str}')
+                    plot_dir = os.path.join(project_root, f'results/plots/{dataset_name}/{task}/{initial_set_str}/cost_aware') if cost_aware else os.path.join(project_root, f'results/plots/{dataset_name}/{task}/{initial_set_str}')
                     os.makedirs(plot_dir, exist_ok=True)
 
                     csv_filepath = os.path.join(csv_dir, 'results.csv')
@@ -426,19 +422,20 @@ if __name__ == '__main__':
                         plot_filepath,
                         budget_bound=100,
                         methods_to_include=None,
-                        log=False
+                        log=False,
+                        cost_aware=cost_aware
                     )
             
-            if len(df_list) == 0:
-                continue
-            plot_filepath = os.path.join(project_root, f"results/plots/{dataset_name}/{task}", f"{type_str}.png")
+            # if len(df_list) == 0:
+            #     continue
+            # plot_filepath = os.path.join(project_root, f"results/plots/{dataset_name}/{task}", f"{type_str}.png")
 
-            plot_r2_vs_num_samples(
-                df_list,
-                task,
-                type_str,
-                plot_filepath,
-                budget_bound=100,
-                methods_to_include=["random"],
-                log=False
-            )
+            # plot_r2_vs_num_samples(
+            #     df_list,
+            #     task,
+            #     type_str,
+            #     plot_filepath,
+            #     budget_bound=100,
+            #     methods_to_include=["random"],
+            #     log=False
+            # )

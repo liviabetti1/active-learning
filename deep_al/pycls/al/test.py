@@ -188,7 +188,6 @@ _C.RANDAUG.M = 5
 # #  ACTIVE LEARNING options
 # #-------------------------------------------------------------------------------#
 _C.ACTIVE_LEARNING = CN()
-_C.ACTIVE_LEARNING.COST_AWARE = False
 _C.ACTIVE_LEARNING.SAMPLING_FN = 'random' # 'entropy', 'margin', 'vaal', 'coreset', 'ensemble_var_R'
 _C.ACTIVE_LEARNING.ACTIVATE = False
 _C.ACTIVE_LEARNING.LSET_PATH = ''
@@ -245,16 +244,6 @@ _C.DATASET.ACCEPTED = ['MNIST','SVHN','CIFAR10','CIFAR100','TINYIMAGENET', 'IMBA
 _C.INITIAL_SET = CN()
 _C.INITIAL_SET.STR = None
 
-# #-------------------------------------------------------------------------------#
-# #  COST options
-# #-------------------------------------------------------------------------------#
-_C.COST = CN()
-_C.COST.FN = None
-_C.COST.ARRAY = None
-_C.COST.REGION_ASSIGNMENT = None
-_C.COST.LABELED_REGION_COST = None
-_C.COST.NEW_REGION_COST = None
-
 def assert_cfg():
     """Checks config values invariants."""
     assert not _C.OPTIM.STEPS or _C.OPTIM.STEPS[0] == 0, \
@@ -292,3 +281,148 @@ def load_cfg(out_dir, cfg_dest='config.yaml'):
     """Loads config from specified output directory."""
     cfg_file = os.path.join(out_dir, cfg_dest)
     _C.merge_from_file(cfg_file)
+
+import os
+import dill
+import numpy as np
+import pandas as pd
+import numpy as np
+
+import cvxpy as cp
+import mosek
+
+import cvxpy_fns.cost as cost
+import cvxpy_fns.util as util
+
+UTILITY_FNS = {
+    "random": util.random,
+    "greedy": util.greedy
+}
+
+COST_FNS = {
+    "uniform": cost.uniform,
+    "pointwise_by_region": cost.pointwise_region_cost
+}
+
+class Opt:
+    def __init__(self, cfg, lSet, uSet, budgetSize, 
+                utility_func_type=None, cost_func_type=None, 
+                utility_func=None, cost_func=None,
+                **kwargs):
+        self.cfg = cfg
+        self.ds_name = self.cfg['DATASET']['NAME']
+        self.seed = self.cfg['RNG_SEED']
+        self.lSet = lSet
+        self.uSet = uSet
+        self.budget = budgetSize
+
+        for key, value in kwargs.items(): #region_assignment, labeled_region_cost, new_region_cost
+            setattr(self, key, value)
+
+        func_types_provided = utility_func_type is not None and cost_func_type is not None
+        func_objs_provided = utility_func is not None and cost_func is not None
+
+        if func_types_provided == func_objs_provided:
+            raise ValueError("You must provide either both utility and cost function type, "
+                            "or both functions, but not both or a mix.")
+
+        if func_types_provided:
+            self.utility_func = self._resolve_utility_func(utility_func_type)
+            self.cost_func = self._resolve_cost_func(cost_func_type)
+        else:
+            self.utility_func = utility_func
+            self.cost_func = cost_func
+
+    def _resolve_utility_func(self, utility_func_type):
+        assert utility_func_type in UTILITY_FNS, "Need to provide a valid utility function type"
+        return UTILITY_FNS[utility_func_type]
+
+    def _resolve_cost_func(self, cost_func_type):
+        assert cost_func_type in COST_FNS, f"Invalid cost function type: {cost_func_type}"
+
+        if cost_func_type == "pointwise_by_region":
+            assert hasattr(self, "region_assignment") and self.region_assignment is not None, \
+                "Attribute 'region_assignment' is required and must not be None for 'pointwise_by_region' cost function"
+
+            labeled_inclusion_vector = np.concatenate([
+                np.ones(len(self.lSet)),
+                np.zeros(len(self.uSet))
+            ]).astype(bool)
+            
+            kwargs = {}
+            if hasattr(self, "labeled_region_cost") and self.labeled_region_cost is not None:
+                kwargs["labeled_region_cost"] = self.labeled_region_cost
+            if hasattr(self, "new_region_cost") and self.new_region_cost is not None:
+                kwargs["new_region_cost"] = self.new_region_cost
+
+            return lambda s: cost.pointwise_region_cost(s, self.region_assignment, labeled_inclusion_vector, **kwargs)
+
+        return COST_FNS[cost_func_type]
+
+    def solve_opt(self):
+        relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
+        labeled_inclusion_vector = np.concatenate([np.ones(len(self.lSet)), np.zeros(len(self.uSet))]).astype(bool)
+
+        n = len(relevant_indices)
+        s = cp.Variable(n, nonneg=True)
+
+        assert s.shape == (len(relevant_indices),), f"s should be shape {(len(relevant_indices),)}, got {s.shape}"
+        assert labeled_inclusion_vector.shape == (len(relevant_indices),), f"labeled_inclusion_vector should be shape {(len(relevant_indices),)}, got {labeled_inclusion_vector.shape}"
+
+        objective = self.utility_func(s)
+        constraints = [
+            0 <= s,
+            s <= 1,
+            self.cost_func(s) <= self.budget + len(self.lSet), #budget only accounts for additional points
+            s[labeled_inclusion_vector] == 1
+        ]
+        prob = cp.Problem(cp.Maximize(objective), constraints)
+        prob.solve(solver = cp.MOSEK)
+
+        assert prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE], \
+            f"Optimization failed. Status: {prob.status}"
+
+        if prob.status == cp.OPTIMAL_INACCURATE:
+            print("Warning: Solution is OPTIMAL_INACCURATE. Results may be unreliable.")
+
+        print("Optimal s is: ", s.value)
+        return s.value
+
+    def select_samples(self):
+        # using only labeled+unlabeled indices, without validation set.
+        relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
+
+        existing_indices = np.arange(len(self.lSet))
+
+        probs = self.solve_opt()
+
+        selected = []
+        sample_inclusion_vector = np.zeros(len(relevant_indices))
+        np.random.seed(42)
+        for i in range(relevant_indices):
+            draw = np.random.choice([0,1], p=[1-probs[i], probs[i]])
+            if draw == 1:
+                selected.append(i)
+            sample_inclusion_vector[i] = draw
+
+        selected = np.array(selected)
+
+        total_sample_cost = self.cost_func(sample_inclusion_vector)
+        print(f"Total Sample Cost: {total_sample_cost}")
+
+        assert len(selected) == self.budget, 'added a different number of samples'
+        assert len(np.intersect1d(selected, existing_indices)) == 0, 'should be new samples'
+        activeSet = relevant_indices[selected]
+        remainSet = np.array(sorted(list(set(self.uSet) - set(activeSet))))
+
+        print(f'Finished the selection of {len(activeSet)} samples.')
+        print(f'Active set is {activeSet}')
+        return activeSet, remainSet, total_sample_cost
+
+
+lSet = [0,1,5,7]
+uSet = [2,3,4,6]
+region_assignment=np.array([0,1,3,3,1,2,2,4])
+budgetSize = 2
+
+opt = Opt(cfg, lSet, uSet, budgetSize, utility_func_type='greedy', cost_func_type='pointwise_by_region', region_assignment=region_assignment)
