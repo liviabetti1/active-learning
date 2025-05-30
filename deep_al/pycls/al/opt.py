@@ -102,6 +102,7 @@ class Opt:
             print("Warning: Solution is OPTIMAL_INACCURATE. Results may be unreliable.")
 
         print("Optimal s is: ", s.value)
+
         return s.value
 
     def select_samples(self):
@@ -144,4 +145,8 @@ class Opt:
 
         print(f'Finished the selection of {len(activeSet)} samples.')
         print(f'Active set is {activeSet}')
-        return activeSet, remainSet, total_sample_cost
+
+        if self.utility_func_type == "random":
+            return activeSet, remainSet, total_sample_cost
+        else:
+            return activeSet, remainSet, total_sample_cost, probs, relevant_indices

@@ -10,7 +10,7 @@ do
                 id_path="/home/libe2152/deep-al/usavars/population/sampled_points/${type}/IDs_${counties}_counties_10_radius_seed_42.pkl"
                 for budget in $(seq 10 10 200)
                 do
-                    for method in random
+                    for method in random greedycost
                     do
                         for cost_func in pointwise_by_region
                         do

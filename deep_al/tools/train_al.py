@@ -86,6 +86,9 @@ def argparser():
     parser.add_argument('--labeled_region_cost', default=1, type=int)
     parser.add_argument('--new_region_cost', default=2, type=int)
 
+    parser.add_argument('--group_type', default=None, type=str)
+    parser.add_argument('--group_assignment_path', default=None, type=str)
+
     return parser
 
 
@@ -150,7 +153,9 @@ def main(cfg):
         exp_dir = f'{now.year}_{now.month}_{now.day}_{now.hour:02}{now.minute:02}{now.second:02}_{now.microsecond}'
     else:
         if cfg.ACTIVE_LEARNING.COST_AWARE:
-            exp_dir = f'{cfg.INITIAL_SET.STR}/cost_aware/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
+            exp_dir = f'{cfg.INITIAL_SET.STR}/cost_aware/{cfg.COST.FN}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
+        elif cfg.ACTIVE_LEARNING.SAMPLING_FN == "representative":
+            exp_dir = f'{cfg.INITIAL_SET.STR}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/{cfg.GROUPS.GROUP_TYPE}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
         else:
             exp_dir = f'{cfg.INITIAL_SET.STR}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
 
@@ -200,7 +205,10 @@ def main(cfg):
         al_obj = ActiveLearning(data_obj, cfg)
 
         if cfg.ACTIVE_LEARNING.COST_AWARE:
-            activeSet, new_uSet, total_cost = al_obj.sample_from_uSet(model, lSet, uSet) #SPECIFY KWARGS HERE
+            if cfg.ACTIVE_LEARNING.SAMPLING_FN == "random":
+                activeSet, new_uSet, total_cost = al_obj.sample_from_uSet(model, lSet, uSet)
+            else:
+                activeSet, new_uSet, total_cost, probs, relevant_indices = al_obj.sample_from_uSet(model, lSet, uSet)
         else:
             activeSet, new_uSet = al_obj.sample_from_uSet(model, lSet, uSet, train_data)
         print(f'Initial Pool is {activeSet}')
@@ -296,31 +304,6 @@ def main(cfg):
             data_obj.saveSet(uSet, 'uSet', cfg.EPISODE_DIR)
             break
 
-        # DCoM's delta-s updating
-        if cfg.ACTIVE_LEARNING.SAMPLING_FN.lower() in ["dcom"]:
-            print("======== Update the deltas dynamically ========\n")
-            from pycls.al.DCoM import DCoM
-            al_algo = DCoM(cfg, lSet, uSet, budgetSize=cfg.ACTIVE_LEARNING.BUDGET_SIZE,
-                                    max_delta=cfg.ACTIVE_LEARNING.MAX_DELTA,
-                                    lSet_deltas=cfg.ACTIVE_LEARNING.DELTA_LST)
-
-            lSet_labels = np.take(train_data.targets, np.asarray(lSet, dtype=np.int64))
-            all_images_idx = np.array(list(lSet) + list(uSet))
-            images_loader = data_obj.getSequentialDataLoader(indexes=all_images_idx,
-                                                    batch_size=cfg.TRAIN.BATCH_SIZE, data=train_data)
-            all_labels = np.take(train_data.targets, np.asarray(all_images_idx, dtype=np.int64))
-
-            images_pseudo_labels = get_label_from_model(images_loader, checkpoint_file, cfg)
-            cfg.ACTIVE_LEARNING.DELTA_LST[
-            -1 * cfg.ACTIVE_LEARNING.BUDGET_SIZE:] = al_algo.new_centroids_deltas(lSet_labels,
-                                                                          all_labels=all_labels,
-                                                                          pseudo_labels=images_pseudo_labels,
-                                                                          budget=cfg.ACTIVE_LEARNING.BUDGET_SIZE)
-
-            delta_lst_float = [np.float(delta) for delta in cfg.ACTIVE_LEARNING.DELTA_LST]
-            delta_avg_lst.append(np.average(delta_lst_float))
-            delta_std_lst.append(np.std(delta_lst_float))
-
         if al_iter >= cfg.ACTIVE_LEARNING.MAX_ITER:
             break
         # Active Sample 
@@ -335,7 +318,15 @@ def main(cfg):
             clf_model = model
         
         if cfg.ACTIVE_LEARNING.COST_AWARE:
-            activeSet, new_uSet, total_cost = al_obj.sample_from_uSet(model, lSet, uSet) #SPECIFY KWARGS HERE
+            if cfg.ACTIVE_LEARNING.SAMPLING_FN == "random":
+                activeSet, new_uSet, total_cost = al_obj.sample_from_uSet(model, lSet, uSet)
+            else:
+                activeSet, new_uSet, total_cost, probs, relevant_indices = al_obj.sample_from_uSet(model, lSet, uSet)
+                latlons = [train_data[idx][2] for idx in relevant_indices]
+                ids = [train_data[idx][3] for idx in relevant_indices]
+                pkl_file = os.path.join(cfg.EXP_DIR, "probabilities.pkl")
+                with open(pkl_file, "wb") as f:
+                    dill.dump({"ids": ids, "latlons": latlons, "probs":probs}, f)
         else:
             activeSet, new_uSet = al_obj.sample_from_uSet(model, lSet, uSet, train_data)
 
@@ -739,5 +730,16 @@ if __name__ == "__main__":
 
         cfg.COST.LABELED_REGION_COST = args.labeled_region_cost
         cfg.COST.NEW_REGION_COST = args.new_region_cost
+
+    group_assignment_path = args.group_assignment_path
+
+    if group_assignment_path is not None:
+        group_type = args.group_type
+        cfg.GROUPS.GROUP_TYPE = group_type
+
+        with open(group_assignment_path, "rb") as f:
+            loaded_group_assignments = dill.load(f)['clusters'] if group_type == 'nlcd' else dill.load(f)['assignments']
+
+        cfg.GROUPS.GROUP_ASSIGNMENT = loaded_group_assignments.tolist() if not isinstance(loaded_group_assignments, list) else loaded_group_assignments
 
     main(cfg)

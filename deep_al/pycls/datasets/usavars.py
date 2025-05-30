@@ -43,8 +43,6 @@ def load_from_pkl(label, split):
     return X, y, latlons, ids
 
 
-
-
 class USAVars(NonGeoDataset):
     """USAVars dataset.
 

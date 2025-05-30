@@ -6,8 +6,17 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 import matplotlib.image as mpimg
+from matplotlib.colors import LogNorm
 
 sns.set_theme(style="whitegrid", context="talk", font_scale=1.1)
+
+custom_palette = {
+    "random": "red",
+    "representative_nlcd": "blue",
+    "representative_state": "green",
+    "typiclust": "#9467bd",         # purple from matplotlib default
+    "inversetypiclust": "#ff7f0e"   # orange from matplotlib default
+}
 
 def nice_initial_set_desc(desc):
     """
@@ -128,14 +137,15 @@ def plot_r2_vs_budget(
         hue="Method",
         style="Method",
         markers=True,
-        palette="Set1",
+        palette=custom_palette,
         alpha=0.9
     )
-    color_palette = sns.color_palette("Set1")
 
     if not cost_aware:
-        for method, color in zip(plot_df["Method"].cat.categories, color_palette):
+        for method in plot_df["Method"].cat.categories:
             method_df = plot_df[plot_df["Method"] == method]
+            color = custom_palette.get(method, "black")
+
             plt.errorbar(
                 x=method_df[x_val],
                 y=method_df["Mean R2"],
@@ -182,6 +192,7 @@ def plot_r2_vs_num_samples(
 ):
 
     plot_df_list = []
+    plt.figure(figsize=(36, 30))
 
     for df in df_list:
         if methods_to_include:
@@ -215,7 +226,7 @@ def plot_r2_vs_num_samples(
                     })
             plot_df = pd.concat([plot_df, pd.DataFrame(new_rows)], ignore_index=True)
 
-        method_order = ["random", "typiclust", "inversetypiclust"]
+        method_order = methods_to_include if methods_to_include is not None else ["random", "typiclust", "inversetypiclust"]
         plot_df["Method"] = pd.Categorical(plot_df["Method"], categories=method_order, ordered=True)
         plot_df = plot_df.sort_values(by=["Method", "Budget"])
 
@@ -233,40 +244,44 @@ def plot_r2_vs_num_samples(
 
         plot_df_list.append(plot_df)
 
-    plot_df = pd.concat(plot_df_list, ignore_index=True)
-    plt.figure(figsize=(24, 20))
+        #plot_df = pd.concat(plot_df_list, ignore_index=True)
 
-    zero_budget_df = plot_df[plot_df["Budget"] == 0]
-    ax = sns.scatterplot(
-        data=plot_df,
-        x="Num Samples jittered",
-        y="Mean R2",
-        hue="Method",
-        style="Method",
-        markers=True,
-        palette="Set1",
-        alpha=0.9
-    )
-    color_palette = sns.color_palette("Set1")
-    plt.scatter(
-        zero_budget_df["Num Samples jittered"],
-        zero_budget_df["Mean R2"],
-        color="black",
-        marker="x",
-        s=200,  # size of the marker
-    )
-
-    for method, color in zip(plot_df["Method"].cat.categories, color_palette):
-        method_df = plot_df[plot_df["Method"] == method]
-        plt.errorbar(
-            x=method_df["Num Samples jittered"],
-            y=method_df["Mean R2"],
-            yerr=method_df["Std R2"],
-            fmt='none',               # No connecting lines or markers
-            capsize=4,
-            elinewidth=1.5,
-            color=color
+        zero_budget_df = plot_df[plot_df["Budget"] == 0]
+        ax = sns.lineplot(
+            data=plot_df,
+            x="Num Samples jittered",
+            y="Mean R2",
+            hue="Method",
+            style="Method",
+            markers=True,
+            palette=custom_palette,
+            alpha=0.9
         )
+        color_palette = sns.color_palette("Set1")
+        plt.scatter(
+            zero_budget_df["Num Samples jittered"],
+            zero_budget_df["Mean R2"],
+            color="black",
+            marker="x",
+            s=200,  # size of the marker
+        )
+
+        for method in plot_df["Method"].cat.categories:
+            method_df = plot_df[plot_df["Method"] == method]
+            color = custom_palette.get(method, "black")
+
+            x = method_df["Num Samples jittered"]
+            y = method_df["Mean R2"]
+            yerr = method_df["Std R2"]
+
+            plt.fill_between(
+                x,
+                y - yerr,
+                y + yerr,
+                color=color,
+                alpha=0.2,  # transparency of the band
+                label=None  # don't add to legend
+            )
 
     # Adjust title and labels with improved font sizes
     ax.set_title(f"Test R² vs Num Samples\nLabel = {label}\nInit Set: {init_set_str}", fontsize=18, fontweight='bold')
@@ -274,7 +289,9 @@ def plot_r2_vs_num_samples(
     ax.set_ylabel("Test R²", fontsize=15)
 
     # Adjust legend outside the plot to avoid overlap
-    ax.legend(title="Methods", loc='upper left', fontsize=12)
+    handles, labels = ax.get_legend_handles_labels()
+    unique = dict(zip(labels, handles))  # later duplicates overwrite earlier ones
+    ax.legend(unique.values(), unique.keys(), title="Method", loc="upper left")
 
     # Apply y-limits if specified
     # plt.ylim(0.1, 0.5)
@@ -285,74 +302,6 @@ def plot_r2_vs_num_samples(
         ax.set_xscale('log')
 
     plt.tight_layout()
-
-    plt.savefig(save_path, bbox_inches="tight", dpi=300)
-    plt.close()
-
-def plot_r2_vs_sample_cost(
-    csv_path,
-    label="TC",
-    init_set_desc="IDs_clustered_500_counties_10_radius_seed_42",
-    methods_to_include=None,
-    save_path=None,
-    ylim=(0.7, 0.88)
-):
-    df = pd.read_csv(csv_path)
-
-    # Filter by label and initial set
-    df = df[
-        (df["Label"] == label) &
-        (df["Initial Set Description"] == init_set_desc)
-    ]
-
-    df = df[df["Sample Cost"] <= 500]
-
-    # Group and aggregate separately
-    grouped= df.groupby(["Method", "Sample Cost"])["Test R2"]
-    r2_mean= grouped.mean().reset_index(name="Mean R2")
-    r2_std = grouped.std().reset_index(name="Std R2")
-
-    # Combine
-    plot_df = r2_mean.merge(r2_std, on=["Method", "Sample Cost"])
-
-    method_order = ["random", "typiclust", "inversetypiclust", "greedycost"]
-    plot_df["Method"] = pd.Categorical(plot_df["Method"], categories=method_order, ordered=True)
-    plot_df = plot_df.sort_values(by=["Method", "Sample Cost"])
-
-    # Plotting
-    plt.figure(figsize=(12, 7))
-    ax = sns.scatterplot(
-        data=plot_df,
-        x="Sample Cost",
-        y="Mean R2",
-        hue="Method",
-        style="Method",
-        markers=True,
-        palette="Set1",
-        alpha=0.9
-    )
-
-    # Update init set description
-    nice_init_set_desc = nice_initial_set_desc(init_set_desc)
-
-    # Adjust title and labels with improved font sizes
-    ax.set_title(f"Test R² vs Sample Cost\nLabel = {nice_label_name(label)}\nInit Set: {nice_init_set_desc}", fontsize=18, fontweight='bold')
-    ax.set_xlabel("Sample Cost", fontsize=15)
-    ax.set_ylabel("Test R²", fontsize=15)
-
-    # Adjust legend outside the plot to avoid overlap
-    ax.legend(title="Methods", loc='upper left', fontsize=12)
-
-    # Apply y-limits if specified
-    #plt.ylim(*ylim)
-
-    ax.grid(True)
-    plt.tight_layout()
-
-    # Handle save path
-    if save_path is None:
-        safe_desc = init_set_desc.replace("/", "_").replace(" ", "_")
-        save_path = Path(f"r2_vs_budget_{label}_{safe_desc}.png")
 
     plt.savefig(save_path, bbox_inches="tight", dpi=300)
     plt.close()
@@ -380,6 +329,73 @@ def plot_r2_grid(base_path_template, type_str, nums):
     parent_dir = os.path.dirname(base_dir)
     plt.savefig(os.path.join(parent_dir, f"{type_str}_combined_{nums}.png"), dpi=300)
 
+def plot_prob_map(latlons, probabilities, cmap="viridis", title="Probability Heat Map", save_path=None):
+    fig, ax = plt.subplots(figsize=(14, 10))
+
+    # Load and plot contiguous US outline
+    world = gpd.read_file(
+        "/home/libe2152/optimizedsampling/country_boundaries/ne_110m_admin_1_states_provinces.shp", 
+        engine="pyogrio"
+    )
+    exclude_states = ["Alaska", "Hawaii", "Puerto Rico"]
+    contiguous_us = world[~world["name"].isin(exclude_states)]
+    contiguous_outline = contiguous_us.dissolve()
+
+    contiguous_outline.boundary.plot(ax=ax, color='black', linewidth=0.8, zorder=3, alpha=0.8)
+
+    # Prepare and sort data
+    latlons = np.array(latlons)
+    probabilities = np.array(probabilities)
+
+    epsilon = 1e-6
+    probabilities = np.clip(probabilities, epsilon, None)
+
+    # Sort to plot low probabilities first
+    sort_idx = np.argsort(probabilities)
+    latlons = latlons[sort_idx]
+    probabilities = probabilities[sort_idx]
+    lons, lats = latlons[:, 1], latlons[:, 0]
+
+    # Create scatter plot with LogNorm
+    norm = LogNorm(vmin=probabilities.min(), vmax=probabilities.max())
+    scatter = ax.scatter(
+        lons, lats,
+        c=probabilities,
+        cmap=cmap,
+        norm=norm,
+        s=12,
+        edgecolor='k',
+        linewidth=0.1,
+        alpha=0.85,
+        zorder=5
+    )
+
+    # Add colorbar
+    cbar = plt.colorbar(scatter, ax=ax, label="Inclusion Probability", shrink=0.7, pad=0.01)
+    cbar.ax.tick_params(labelsize=10)
+    cbar.ax.yaxis.set_offset_position('left')
+    cbar.outline.set_visible(False)
+
+    # Title and axis
+    ax.set_title(title, fontsize=16, pad=15)
+    ax.set_xlabel("Longitude", fontsize=12)
+    ax.set_ylabel("Latitude", fontsize=12)
+
+    # Ticks and grid
+    ax.tick_params(axis='both', which='major', labelsize=10)
+    ax.grid(visible=True, linestyle='--', linewidth=0.5, alpha=0.4, zorder=2)
+
+    # Set axis limits and aspect ratio
+    ax.set_xlim([-130, -65])
+    ax.set_ylim([23, 50])
+    ax.set_aspect('equal', adjustable='box')
+
+    # Tight layout and save
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
 
 if __name__ == '__main__':
     # base_path_template = '/home/libe2152/deep-al/results/plots/USAVARS/population/{type_str}_{num}_counties_10_radius/R2 vs budget.png'
@@ -389,12 +405,12 @@ if __name__ == '__main__':
     
     dataset_name = "USAVARS"
     labels = ['treecover', 'population']
-    cost_aware=True
+    cost_aware=False
 
     for task in labels:
-        for type_str in ['density']:
+        for type_str in ['clustered', 'density']:
             df_list = []
-            for num_counties in [25]:
+            for num_counties in [25, 50, 75, 100, 125, 150, 175, 200]:
                 for radius in [10]:
                     initial_set_str = f'{type_str}_{num_counties}_counties_{radius}_radius'
 
@@ -415,27 +431,27 @@ if __name__ == '__main__':
                     df = pd.read_csv(csv_filepath)
                     df_list.append(df)
 
-                    plot_r2_vs_budget(
-                        df,
-                        task,
-                        initial_set_str,
-                        plot_filepath,
-                        budget_bound=100,
-                        methods_to_include=None,
-                        log=False,
-                        cost_aware=cost_aware
-                    )
+                    # plot_r2_vs_budget(
+                    #     df,
+                    #     task,
+                    #     initial_set_str,
+                    #     plot_filepath,
+                    #     budget_bound=100,
+                    #     methods_to_include=None,
+                    #     log=False,
+                    #     cost_aware=cost_aware
+                    # )
             
-            # if len(df_list) == 0:
-            #     continue
-            # plot_filepath = os.path.join(project_root, f"results/plots/{dataset_name}/{task}", f"{type_str}.png")
+            if len(df_list) == 0:
+                continue
+            plot_filepath = os.path.join(project_root, f"results/plots/{dataset_name}/{task}", f"{type_str}.png")
 
-            # plot_r2_vs_num_samples(
-            #     df_list,
-            #     task,
-            #     type_str,
-            #     plot_filepath,
-            #     budget_bound=100,
-            #     methods_to_include=["random"],
-            #     log=False
-            # )
+            plot_r2_vs_num_samples(
+                df_list,
+                task,
+                type_str,
+                plot_filepath,
+                budget_bound=200,
+                methods_to_include=["random", "representative_state"],
+                log=False
+            )

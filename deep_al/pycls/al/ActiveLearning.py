@@ -40,8 +40,12 @@ class ActiveLearning:
             opt = Opt(self.cfg, lSet, uSet, budgetSize=self.cfg.ACTIVE_LEARNING.BUDGET_SIZE)
             opt.set_utility_func(self.cfg.ACTIVE_LEARNING.SAMPLING_FN)
                 
-            activeSet, uSet, total_cost = opt.select_samples()
-            return activeSet, uSet, total_cost
+            if self.cfg.ACTIVE_LEARNING.SAMPLING_FN == "random":
+                activeSet, uSet, total_cost = opt.select_samples()
+                return activeSet, uSet, total_cost
+            else:
+                activeSet, uSet, total_cost, probs, relevant_indices = opt.select_samples()
+                return activeSet, uSet, total_cost, probs, relevant_indices 
 
         if self.cfg.ACTIVE_LEARNING.SAMPLING_FN == "random":
 
@@ -58,6 +62,12 @@ class ActiveLearning:
             is_scan = self.cfg.ACTIVE_LEARNING.SAMPLING_FN.endswith('dc')
             tpc = TypiClust(self.cfg, lSet, uSet, budgetSize=self.cfg.ACTIVE_LEARNING.BUDGET_SIZE, inverse=True, is_scan=is_scan)
             activeSet, uSet = tpc.select_samples()
+
+        elif self.cfg.ACTIVE_LEARNING.SAMPLING_FN in ["rep", "representative", "representation"]:
+            from .representation import Representation
+            rep = Representation(self.cfg, lSet, uSet, budgetSize=self.cfg.ACTIVE_LEARNING.BUDGET_SIZE)
+            activeSet, uSet = rep.select_samples()
+
         else:
             print(f"{self.cfg.ACTIVE_LEARNING.SAMPLING_FN} is either not implemented or there is some spelling mistake.")
             raise NotImplementedError

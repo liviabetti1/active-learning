@@ -255,6 +255,13 @@ _C.COST.REGION_ASSIGNMENT = None
 _C.COST.LABELED_REGION_COST = None
 _C.COST.NEW_REGION_COST = None
 
+# #-------------------------------------------------------------------------------#
+# #  GROUP options
+# #-------------------------------------------------------------------------------#
+_C.GROUPS = CN()
+_C.GROUPS.GROUP_TYPE = None
+_C.GROUPS.GROUP_ASSIGNMENT = None
+
 def assert_cfg():
     """Checks config values invariants."""
     assert not _C.OPTIM.STEPS or _C.OPTIM.STEPS[0] == 0, \

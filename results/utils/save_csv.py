@@ -58,10 +58,21 @@ def iterate_log_files_and_extract_data(dataset_name, task, initial_set_str, cost
             # Try to match the expected directory structure
             parts = file_path.split(os.sep)
 
+            if not cost_aware and "cost_aware" in parts:
+                continue
+
             try:         
-                method = parts[9].lower() if cost_aware else parts[8].lower()
-                budget = int(parts[10].split('_')[1]) if cost_aware else int(parts[10].split('_')[1])  
-                al_seed = int(parts[11].split('_')[1]) if cost_aware else int(parts[10].split('_')[1])
+                if "representative" in parts:
+                    rep_idx = parts.index("representative")
+                    rep_type = parts[rep_idx + 1]  # 'nlcd' or 'state'
+                    method = f"representative_{rep_type}"
+                    budget = int(parts[rep_idx + 2].split('_')[1])  # budget_#
+                    al_seed = int(parts[rep_idx + 3].split('_')[1])  # seed_#
+                else:
+                    cost_func = parts[9].lower() if cost_aware else None
+                    method = parts[10].lower() if cost_aware else parts[8].lower()
+                    budget = int(parts[11].split('_')[1]) if cost_aware else int(parts[9].split('_')[1])
+                    al_seed = int(parts[12].split('_')[1]) if cost_aware else int(parts[10].split('_')[1])
             except Exception as e:
                 from IPython import embed; embed()
                 print(f"Skipping path {file_path} due to parse error: {e}")
@@ -77,7 +88,9 @@ def iterate_log_files_and_extract_data(dataset_name, task, initial_set_str, cost
                         initial_labeled_set_size,
                         initial_test_r2,
                         budget,
+                        last_labeled_set_size,
                         last_test_r2,
+                        cost_func,
                         total_cost
                     ])
                 else:
@@ -96,14 +109,10 @@ def iterate_log_files_and_extract_data(dataset_name, task, initial_set_str, cost
 
     return data_rows
 
-def save_to_csv():
-    dataset_name = "USAVARS"
-    labels = ['treecover', 'population']
-    cost_aware = True
-
+def save_to_csv(dataset_name, labels, cost_aware):
     for task in labels:
-        for type_str in ['density']:
-            for num_counties in [25]:
+        for type_str in ['clustered', 'density']:
+            for num_counties in [25, 50, 75, 100, 125, 150, 175, 200]:
                 for radius in [10]:
                     initial_set_str = f'{type_str}_{num_counties}_counties_{radius}_radius'
 
@@ -122,7 +131,7 @@ def save_to_csv():
 
                     csv_filepath = os.path.join(csv_dir, 'results.csv')
 
-                    header = ['Method', 'Seed', 'Initial Set Size', 'Initial Test R2', 'Budget', 'Test R2', 'Total Cost'] if cost_aware else ['Method', 'Seed', 'Initial Set Size', 'Initial Test R2', 'Budget', 'Test R2']
+                    header = ['Method', 'Seed', 'Initial Set Size', 'Initial Test R2', 'Budget', 'Labeled Set Size', 'Test R2', 'Cost Function', 'Total Cost'] if cost_aware else ['Method', 'Seed', 'Initial Set Size', 'Initial Test R2', 'Budget', 'Test R2']
 
                     with open(csv_filepath, mode='w', newline='') as file:
                         writer = csv.writer(file)
@@ -132,4 +141,9 @@ def save_to_csv():
                     print(f"Data has been written to {csv_filepath}")
 
 if __name__ == '__main__':
-    save_to_csv()
+    dataset_name = "USAVARS"
+    labels = ['treecover', 'population']
+    cost_aware = True
+
+
+    save_to_csv(dataset_name, labels, cost_aware)
