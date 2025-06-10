@@ -12,19 +12,22 @@ from . import cost as np_cost
 
 UTILITY_FNS = {
     "random": util.random,
-    "greedycost": util.greedy
+    "greedycost": util.greedy,
+    "poprisk": util.pop_risk
 }
 
 COST_FNS = {
     "uniform": cost.uniform,
     "pointwise_by_region": cost.pointwise_by_region,
-    "pointwise_by_array": cost.pointwise_by_array
+    "pointwise_by_array": cost.pointwise_by_array,
+    "clustered_by_region": cost.clustered_by_region
 }
 
 NP_COST_FNS = {
     "uniform": np_cost.uniform,
     "pointwise_by_region": np_cost.pointwise_by_region,
-    "pointwise_by_array": np_cost.pointwise_by_array
+    "pointwise_by_array": np_cost.pointwise_by_array,
+    "clustered_by_region": np_cost.clustered_by_region
 }
 
 class Opt:
@@ -42,6 +45,16 @@ class Opt:
             raise ValueError(f"Invalid utility function type: {utility_func_type}")
         self.utility_func_type = utility_func_type
         self.utility_func = UTILITY_FNS[utility_func_type]
+
+        if utility_func_type == "poprisk":
+            assert self.cfg.GROUPS.GROUP_ASSIGNMENT is not None, "Group assignment must not be none for poprisk utility function"
+
+            self.group_assignment = np.array(self.cfg.GROUPS.GROUP_ASSIGNMENT)
+
+            relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
+            self.group_assignment = self.group_assignment[relevant_indices]
+
+            self.utility_func = lambda s: util.pop_risk(s, self.group_assignment)
         print(f"Utility function set to: {utility_func_type}")
 
     def _resolve_cost_func(self):
@@ -49,7 +62,10 @@ class Opt:
         self.cost_func_type = cost_func_type
         assert cost_func_type in COST_FNS, f"Invalid cost function type: {cost_func_type}"
 
-        if cost_func_type == "pointwise_by_region":
+        self.cost_func = COST_FNS[cost_func_type]
+        self.np_cost_func = NP_COST_FNS[cost_func_type]
+
+        if cost_func_type == "pointwise_by_region" or "clustered_by_region":
             assert self.cfg.COST.REGION_ASSIGNMENT is not None, \
                 "Region Assignment must not be None for 'pointwise_by_region' cost function"
             self.region_assignment = np.array(self.cfg.COST.REGION_ASSIGNMENT)
@@ -59,8 +75,12 @@ class Opt:
 
             self.region_assignment = self.region_assignment[relevant_indices] #need to align region assignment with indices
 
-            self.cost_func = lambda s: cost.pointwise_by_region(s, self.region_assignment, labeled_inclusion_vector, labeled_region_cost=self.cfg.COST.LABELED_REGION_COST, new_region_cost=self.cfg.COST.NEW_REGION_COST)
-            self.np_cost_func = lambda s: np_cost.pointwise_by_region(s, self.region_assignment, labeled_inclusion_vector, labeled_region_cost=self.cfg.COST.LABELED_REGION_COST, new_region_cost=self.cfg.COST.NEW_REGION_COST)
+            if cost_func_type == "pointwise_by_region":
+                self.cost_func = lambda s: cost.pointwise_by_region(s, self.region_assignment, labeled_inclusion_vector, labeled_region_cost=self.cfg.COST.LABELED_REGION_COST, new_region_cost=self.cfg.COST.NEW_REGION_COST)
+                self.np_cost_func = lambda s: np_cost.pointwise_by_region(s, self.region_assignment, labeled_inclusion_vector, labeled_region_cost=self.cfg.COST.LABELED_REGION_COST, new_region_cost=self.cfg.COST.NEW_REGION_COST)
+            elif cost_func_type == "clustered_by_region":
+                self.cost_func = lambda s: cost.clustered_by_region(s, self.region_assignment, labeled_inclusion_vector, labeled_region_cost=self.cfg.COST.LABELED_REGION_COST, new_region_cost=self.cfg.COST.NEW_REGION_COST)
+                self.np_cost_func = lambda s: np_cost.clustered_by_region(s, self.region_assignment, labeled_inclusion_vector, labeled_region_cost=self.cfg.COST.LABELED_REGION_COST, new_region_cost=self.cfg.COST.NEW_REGION_COST)
 
         elif cost_func_type == "pointwise_by_array":
             assert self.cfg.COST.ARRAY is not None, "Cost array must not be None for this cost function"
@@ -68,10 +88,6 @@ class Opt:
 
             self.cost_func = lambda s: cost.pointwise_by_array(s, self.cost_array)
             self.np_cost_func = lambda s: np_cost.pointwise_by_array(s, self.cost_array)
-
-        else:
-            self.cost_func = COST_FNS[cost_func_type]
-            self.np_cost_func = NP_COST_FNS[cost_func_type]
 
     def solve_opt(self):
         assert self.utility_func_type != "Random", "Please do not use the optimization function for random selection"

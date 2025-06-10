@@ -42,7 +42,7 @@ class Representation:
                 group_ratios[group] = labeled_count / total_count
 
             # Sort groups by increasing representation ratio
-            sorted_groups = sorted(group_ratios.items(), key=lambda x: x[1])
+            sorted_groups = sorted(np.random.shuffle(group_ratios.items()), key=lambda x: x[1])
 
             chosen = None
             for group, ratio in sorted_groups:

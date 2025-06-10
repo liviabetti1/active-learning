@@ -717,8 +717,8 @@ if __name__ == "__main__":
         cfg.LSET_IDS = loaded_ids.tolist()
         cfg.INIT_L_NUM = len(loaded_ids)
     else:
-        cfg.LSET_IDS = args.from_ids
-        cfg.INIT_L_NUM = args.initial_size
+        cfg.LSET_IDS = []
+        cfg.INIT_L_NUM = 0
 
     region_assignment_path = args.region_assignment_path
 

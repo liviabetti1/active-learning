@@ -38,7 +38,7 @@ def get_all_costs(label, cost_dict_path):
     return all_costs
 
 class GreedyCost:
-    def __init__(self, cfg, lSet, uSet, budgetSize, cost_path):
+    def __init__(self, cfg, lSet, uSet, budgetSize):
         self.cfg = cfg
         self.ds_name = self.cfg['DATASET']['NAME']
         self.seed = self.cfg['RNG_SEED']

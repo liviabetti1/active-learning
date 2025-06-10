@@ -8,12 +8,15 @@ from pathlib import Path
 import matplotlib.image as mpimg
 from matplotlib.colors import LogNorm
 
-sns.set_theme(style="whitegrid", context="talk", font_scale=1.1)
+sns.set_theme(style="whitegrid", context="talk", font_scale=1.3)
+
+plt.rcParams.update({'font.size': 16})
 
 custom_palette = {
     "random": "red",
-    "representative_nlcd": "blue",
+    "representative_nlcd": "#3b72a3",
     "representative_state": "green",
+    "greedycost": "gray",
     "typiclust": "#9467bd",         # purple from matplotlib default
     "inversetypiclust": "#ff7f0e"   # orange from matplotlib default
 }
@@ -56,7 +59,7 @@ def plot_r2_vs_budget(
     save_path,
     budget_bound=np.inf,
     methods_to_include=None,
-    log=True,
+    log=False,
     jitter=True,
     cost_aware=False
 ):
@@ -104,12 +107,12 @@ def plot_r2_vs_budget(
         plot_df = pd.concat([plot_df, pd.DataFrame(new_rows)], ignore_index=True)
 
     # Method ordering
-    method_order = ["random", "greedycost"] if cost_aware else ["random", "typiclust", "inversetypiclust"]
+    method_order = ["random", "greedycost"] if cost_aware else ["random", "typiclust", "inversetypiclust", "representative_nlcd", "representative_state"]
     plot_df["Method"] = pd.Categorical(plot_df["Method"], categories=method_order, ordered=True)
     plot_df = plot_df.sort_values(by=["Method", x_val])
 
     # Jitter setup
-    jitter_strength = 0.03
+    jitter_strength = 0.01
     Budget_str = "Budget"
     if jitter:
         method_to_jitter = {
@@ -117,12 +120,12 @@ def plot_r2_vs_budget(
         }
         plot_df["Budget_jittered"] = plot_df.apply(
             lambda row: row["Budget"] + row['Budget'] * method_to_jitter[row["Method"]], axis=1
-        )
+        ) if log else plot_df.apply(lambda row: row["Budget"] + 50 * method_to_jitter[row["Method"]], axis=1)
         Budget_str = "Budget_jittered"
     x_val = x_val if cost_aware else Budget_str
 
     # Plotting
-    plt.figure(figsize=(12, 7))
+    plt.figure(figsize=(20, 10))
     sns.set(style="whitegrid")
 
     if cost_aware:
@@ -264,6 +267,7 @@ def plot_r2_vs_num_samples(
             color="black",
             marker="x",
             s=200,  # size of the marker
+            linewidths=3 
         )
 
         for method in plot_df["Method"].cat.categories:
@@ -405,7 +409,9 @@ if __name__ == '__main__':
     
     dataset_name = "USAVARS"
     labels = ['treecover', 'population']
-    cost_aware=False
+    cost_aware=True
+    methods_to_include=["random", "greedycost"]
+    method_str = "_".join(methods_to_include)
 
     for task in labels:
         for type_str in ['clustered', 'density']:
@@ -422,7 +428,7 @@ if __name__ == '__main__':
                     os.makedirs(plot_dir, exist_ok=True)
 
                     csv_filepath = os.path.join(csv_dir, 'results.csv')
-                    plot_filepath = os.path.join(plot_dir, 'R2 vs budget.png')
+                    plot_filepath = os.path.join(plot_dir, f'R2_vs_budget_{method_str}.png')
 
                     if not os.path.exists(csv_filepath):
                         print(f"{csv_filepath} does not exist.")
@@ -431,20 +437,21 @@ if __name__ == '__main__':
                     df = pd.read_csv(csv_filepath)
                     df_list.append(df)
 
-                    # plot_r2_vs_budget(
-                    #     df,
-                    #     task,
-                    #     initial_set_str,
-                    #     plot_filepath,
-                    #     budget_bound=100,
-                    #     methods_to_include=None,
-                    #     log=False,
-                    #     cost_aware=cost_aware
-                    # )
+                    plot_r2_vs_budget(
+                        df,
+                        task,
+                        initial_set_str,
+                        plot_filepath,
+                        budget_bound=1000,
+                        methods_to_include=methods_to_include,
+                        log=False,
+                        cost_aware=cost_aware
+                    )
             
             if len(df_list) == 0:
                 continue
-            plot_filepath = os.path.join(project_root, f"results/plots/{dataset_name}/{task}", f"{type_str}.png")
+
+            plot_filepath = os.path.join(project_root, f"results/plots/{dataset_name}/{task}", f"{type_str}_{method_str}.png")
 
             plot_r2_vs_num_samples(
                 df_list,
@@ -452,6 +459,6 @@ if __name__ == '__main__':
                 type_str,
                 plot_filepath,
                 budget_bound=200,
-                methods_to_include=["random", "representative_state"],
+                methods_to_include=methods_to_include,
                 log=False
             )

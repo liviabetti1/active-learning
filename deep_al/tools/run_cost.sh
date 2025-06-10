@@ -1,16 +1,24 @@
 for label in POP
 do
-    for type in density clustered
+    for type in clustered density
     do
-        for counties in 25 50 75 100 125 150 175 200
+        for counties in 125 150 175 200
         do
             for radius in 10
             do
                 initial_set_str="${type}_${counties}_counties_${radius}_radius"
                 id_path="/home/libe2152/deep-al/usavars/population/sampled_points/${type}/IDs_${counties}_counties_10_radius_seed_42.pkl"
-                for budget in $(seq 10 10 200)
+
+                # Determine appropriate budget range
+                if [[ "$type" == "clustered" && "$counties" -eq 125 ]]; then
+                    budgets=$(seq 130 10 200)
+                else
+                    budgets=$(seq 10 10 200)
+                fi
+
+                for budget in $budgets
                 do
-                    for method in random greedycost
+                    for method in random
                     do
                         for cost_func in pointwise_by_region
                         do

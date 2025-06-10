@@ -143,7 +143,7 @@ def save_to_csv(dataset_name, labels, cost_aware):
 if __name__ == '__main__':
     dataset_name = "USAVARS"
     labels = ['treecover', 'population']
-    cost_aware = True
+    cost_aware = False
 
 
     save_to_csv(dataset_name, labels, cost_aware)
