@@ -35,114 +35,189 @@ def get_labeled_set_test_r2(file_path, cost_aware=False):
     return initial_labeled_set_size, initial_test_r2, last_labeled_set_size, last_test_r2
 
 def iterate_log_files_and_extract_data(dataset_name, task, initial_set_str, cost_aware=False):
-    """Iterate through new-style experiment directories and extract relevant data."""
+    import os
     data_rows = []
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+    base_dir = os.path.join(project_root, 'output', dataset_name, task, initial_set_str)
 
-    log_dir = os.path.join(project_root, 'output', dataset_name, task, initial_set_str, 'cost_aware') if cost_aware else os.path.join(project_root, 'output', dataset_name, task, initial_set_str)
+    dirs_to_check = []
 
-    if not os.path.exists(log_dir):
-        print(f"{log_dir} does not exist.")
-        return None
+    if cost_aware:
+        cost_aware_dir = os.path.join(base_dir, 'cost_aware')
+        if not os.path.exists(cost_aware_dir):
+            print(f"{cost_aware_dir} does not exist.")
+            return None
+        dirs_to_check.append(cost_aware_dir)
+    else:
+        dirs_to_check.append(base_dir)
+        uniform_dir = os.path.join(base_dir, 'cost_aware', 'uniform')
+        if os.path.exists(uniform_dir):
+            dirs_to_check.append(uniform_dir)
 
-    # Traverse all directories under log_dir
-    for root, _, files in os.walk(log_dir):
-        for file in files:
-            if file == 'stdout.log':
+    for log_dir in dirs_to_check:
+        for root, _, files in os.walk(log_dir):
+            for file in files:
+                if file != 'stdout.log':
+                    continue
+
                 file_path = os.path.join(root, file)
-            else:
-                continue
+                parts = file_path.split(os.sep)
 
-            # Try to match the expected directory structure
-            parts = file_path.split(os.sep)
+                try:
+                    if "cost_aware" in parts:
+                        cost_aware_flag = True
 
-            if not cost_aware and "cost_aware" in parts:
-                continue
+                        cost_aware_idx = parts.index('cost_aware')
+                        cost_func = parts[cost_aware_idx + 1].lower()
+                        method = parts[cost_aware_idx + 2].lower()
 
-            try:         
-                if "representative" in parts:
-                    rep_idx = parts.index("representative")
-                    rep_type = parts[rep_idx + 1]  # 'nlcd' or 'state'
-                    method = f"representative_{rep_type}"
-                    budget = int(parts[rep_idx + 2].split('_')[1])  # budget_#
-                    al_seed = int(parts[rep_idx + 3].split('_')[1])  # seed_#
-                else:
-                    cost_func = parts[9].lower() if cost_aware else None
-                    method = parts[10].lower() if cost_aware else parts[8].lower()
-                    budget = int(parts[11].split('_')[1]) if cost_aware else int(parts[9].split('_')[1])
-                    al_seed = int(parts[12].split('_')[1]) if cost_aware else int(parts[10].split('_')[1])
-            except Exception as e:
-                from IPython import embed; embed()
-                print(f"Skipping path {file_path} due to parse error: {e}")
-                continue
+                        possible_group_type = parts[cost_aware_idx + 3].lower()
+                        if possible_group_type in ['nlcd', 'state']:
+                            group_type = possible_group_type
+                            budget_idx = cost_aware_idx + 4
+                            seed_idx = cost_aware_idx + 5
+                        else:
+                            group_type = None
+                            budget_idx = cost_aware_idx + 3
+                            seed_idx = cost_aware_idx + 4
 
-            try:
-                if cost_aware:
-                    initial_labeled_set_size, initial_test_r2, last_labeled_set_size, last_test_r2, total_cost = get_labeled_set_test_r2(file_path, cost_aware=cost_aware)
+                        budget = int(parts[budget_idx].split('_')[1])
+                        al_seed = int(parts[seed_idx].split('_')[1])
+                    else:
+                        cost_aware_flag = False
+                        cost_func = None
 
-                    data_rows.append([
-                        method,
-                        al_seed,
-                        initial_labeled_set_size,
-                        initial_test_r2,
-                        budget,
-                        last_labeled_set_size,
-                        last_test_r2,
-                        cost_func,
-                        total_cost
-                    ])
-                else:
-                    initial_labeled_set_size, initial_test_r2, last_labeled_set_size, last_test_r2 = get_labeled_set_test_r2(file_path)
+                        # Budget and seed folders:
+                        budget_idx = -3
+                        seed_idx = -2
 
-                    data_rows.append([
-                        method,
-                        al_seed,
-                        initial_labeled_set_size,
-                        initial_test_r2,
-                        budget,
-                        last_test_r2
-                    ])
-            except Exception as e:
-                print(f"Error processing {file_path}: {e}")
+                        # Start by assuming the common case: method with optional group_type before it
+                        possible_group_type = parts[-4].lower()
+                        if possible_group_type in ['nlcd', 'state']:
+                            group_type = possible_group_type
+                            method = parts[-5].lower()
+                        else:
+                            group_type = None
+                            method = parts[-4].lower()
 
-    return data_rows
+                        budget = int(parts[budget_idx].split('_')[1])
+                        al_seed = int(parts[seed_idx].split('_')[1])
+
+                        budget = int(parts[budget_idx].split('_')[1])
+                        al_seed = int(parts[seed_idx].split('_')[1])
+                except Exception as e:
+                    print(f"Skipping {file_path} due to parse error: {e}")
+                    continue
+
+                try:
+                    # Append group_type to method if applicable
+                    if group_type:
+                        method = f"{method}_{group_type}"
+
+                    if cost_aware_flag and cost_func != 'uniform':
+                        initial_labeled_set_size, initial_test_r2, last_labeled_set_size, last_test_r2, total_cost = get_labeled_set_test_r2(
+                            file_path, cost_aware=True
+                        )
+
+                        row = [
+                            method,
+                            al_seed,
+                            initial_labeled_set_size,
+                            initial_test_r2,
+                            budget,
+                            last_labeled_set_size,
+                            last_test_r2,
+                            cost_func,
+                            total_cost
+                        ]
+                    else:
+                        initial_labeled_set_size, initial_test_r2, last_labeled_set_size, last_test_r2 = get_labeled_set_test_r2(
+                            file_path, cost_aware=False
+                        )
+
+                        row = [
+                            method,
+                            al_seed,
+                            initial_labeled_set_size,
+                            initial_test_r2,
+                            budget,
+                            last_test_r2
+                        ]
+
+                    data_rows.append(row)
+
+                except Exception as e:
+                    print(f"Error processing {file_path}: {e}")
+                    continue
+
+    return data_rows if data_rows else None
+
 
 def save_to_csv(dataset_name, labels, cost_aware):
+    points_per_cluster_list = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
+    desired_sizes = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+    top_urban_points = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+
     for task in labels:
-        for type_str in ['clustered', 'density']:
-            for num_counties in [25, 50, 75, 100, 125, 150, 175, 200]:
-                for radius in [10]:
-                    initial_set_str = f'{type_str}_{num_counties}_counties_{radius}_radius'
+        # --- Original clusters ---
+        for num_points_per_cluster in points_per_cluster_list:
+            for desired_size in desired_sizes:
+                initial_set_str = f"state_strata_county_clusters_{num_points_per_cluster}_points_per_cluster_{desired_size}_size"
+                _write_csv_from_logs(dataset_name, task, initial_set_str, cost_aware)
 
-                    data = iterate_log_files_and_extract_data(dataset_name, task, initial_set_str, cost_aware=cost_aware)
-                    if data is None:
-                        continue
+        # --- Top 50 urban areas ---
+        for num in top_urban_points:
+            initial_set_str = f"top50_urban_areas_{num}_points"
+            _write_csv_from_logs(dataset_name, task, initial_set_str, cost_aware)
 
-                    # Sort by: Label, Budget, Method
-                    data.sort(key=lambda row: (row[0], row[4]))
 
-                    script_dir = os.path.dirname(os.path.abspath(__file__))
-                    project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+def _write_csv_from_logs(dataset_name, task, initial_set_str, cost_aware):
+    data = iterate_log_files_and_extract_data(
+        dataset_name,
+        task,
+        initial_set_str,
+        cost_aware=cost_aware
+    )
+    if data is None:
+        print(f"No data found for {initial_set_str} ({task})")
+        return
 
-                    csv_dir = os.path.join(project_root, f'results/csv/{dataset_name}/{task}/{initial_set_str}/cost_aware') if cost_aware else os.path.join(project_root, f'results/csv/{dataset_name}/{task}/{initial_set_str}')
-                    os.makedirs(csv_dir, exist_ok=True)
+    # Sort by: Method, Budget (assuming method = row[0], budget = row[4])
+    data.sort(key=lambda row: (row[0], row[4]))
 
-                    csv_filepath = os.path.join(csv_dir, 'results.csv')
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
 
-                    header = ['Method', 'Seed', 'Initial Set Size', 'Initial Test R2', 'Budget', 'Labeled Set Size', 'Test R2', 'Cost Function', 'Total Cost'] if cost_aware else ['Method', 'Seed', 'Initial Set Size', 'Initial Test R2', 'Budget', 'Test R2']
+    csv_dir = os.path.join(
+        project_root,
+        f'results/csv/{dataset_name}/{task}/{initial_set_str}/cost_aware'
+    ) if cost_aware else os.path.join(
+        project_root,
+        f'results/csv/{dataset_name}/{task}/{initial_set_str}'
+    )
+    os.makedirs(csv_dir, exist_ok=True)
 
-                    with open(csv_filepath, mode='w', newline='') as file:
-                        writer = csv.writer(file)
-                        writer.writerow(header)
-                        writer.writerows(data)
+    csv_filepath = os.path.join(csv_dir, 'results.csv')
 
-                    print(f"Data has been written to {csv_filepath}")
+    header = (
+        ['Method', 'Seed', 'Initial Set Size', 'Initial Test R2', 'Budget',
+         'Labeled Set Size', 'Test R2', 'Cost Function', 'Total Cost']
+        if cost_aware else
+        ['Method', 'Seed', 'Initial Set Size', 'Initial Test R2', 'Budget', 'Test R2']
+    )
+
+    with open(csv_filepath, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(header)
+        writer.writerows(data)
+
+    print(f"Data written to {csv_filepath}")
 
 if __name__ == '__main__':
     dataset_name = "USAVARS"
-    labels = ['treecover', 'population']
+    labels = ['population']
     cost_aware = False
 
 

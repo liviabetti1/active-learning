@@ -63,9 +63,14 @@ class ActiveLearning:
             tpc = TypiClust(self.cfg, lSet, uSet, budgetSize=self.cfg.ACTIVE_LEARNING.BUDGET_SIZE, inverse=True, is_scan=is_scan)
             activeSet, uSet = tpc.select_samples()
 
-        elif self.cfg.ACTIVE_LEARNING.SAMPLING_FN in ["rep", "representative", "representation"]:
+        elif self.cfg.ACTIVE_LEARNING.SAMPLING_FN in ["stratified"]:
             from .representation import Representation
-            rep = Representation(self.cfg, lSet, uSet, budgetSize=self.cfg.ACTIVE_LEARNING.BUDGET_SIZE)
+            rep = Representation(self.cfg, lSet, uSet, budgetSize=self.cfg.ACTIVE_LEARNING.BUDGET_SIZE, strategy="balanced")
+            activeSet, uSet = rep.select_samples()
+
+        elif self.cfg.ACTIVE_LEARNING.SAMPLING_FN in ["match_population_proportion"]:
+            from .representation import Representation
+            rep = Representation(self.cfg, lSet, uSet, budgetSize=self.cfg.ACTIVE_LEARNING.BUDGET_SIZE, strategy="match_population")
             activeSet, uSet = rep.select_samples()
 
         else:

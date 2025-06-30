@@ -89,6 +89,10 @@ def argparser():
     parser.add_argument('--group_type', default=None, type=str)
     parser.add_argument('--group_assignment_path', default=None, type=str)
 
+    parser.add_argument('--util_lambda', default=None, type=float, help='Value of lambda in pop risk utility function')
+    parser.add_argument('--similarity_matrix_path', default=None, type=str)
+    parser.add_argument('--distance_matrix_path', default=None, type=str)
+
     return parser
 
 
@@ -126,6 +130,7 @@ def main(cfg):
     label_mapping = {
         "POP": "population",
         "TC": "treecover",
+        "INC": "income"
         # Add more if needed
     }
 
@@ -153,11 +158,15 @@ def main(cfg):
         exp_dir = f'{now.year}_{now.month}_{now.day}_{now.hour:02}{now.minute:02}{now.second:02}_{now.microsecond}'
     else:
         if cfg.ACTIVE_LEARNING.COST_AWARE:
-            exp_dir = f'{cfg.INITIAL_SET.STR}/cost_aware/{cfg.COST.FN}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
-        elif cfg.ACTIVE_LEARNING.SAMPLING_FN == "representative":
-            exp_dir = f'{cfg.INITIAL_SET.STR}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/{cfg.GROUPS.GROUP_TYPE}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
+            if cfg.GROUPS.GROUP_TYPE is not None:
+                exp_dir = f'{cfg.INITIAL_SET.STR}/cost_aware/{cfg.COST.FN}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/{cfg.GROUPS.GROUP_TYPE}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
+            else:
+                exp_dir = f'{cfg.INITIAL_SET.STR}/cost_aware/{cfg.COST.FN}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
         else:
-            exp_dir = f'{cfg.INITIAL_SET.STR}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
+            if cfg.GROUPS.GROUP_TYPE is not None:
+                exp_dir = f'{cfg.INITIAL_SET.STR}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/{cfg.GROUPS.GROUP_TYPE}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
+            else:
+                exp_dir = f'{cfg.INITIAL_SET.STR}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
 
     exp_dir = os.path.join(dataset_out_dir, exp_dir)
     if not os.path.exists(exp_dir):
@@ -697,6 +706,7 @@ if __name__ == "__main__":
     cfg.EXP_NAME = args.exp_name
     cfg.ACTIVE_LEARNING.COST_AWARE = args.cost_aware
     cfg.ACTIVE_LEARNING.SAMPLING_FN = args.al
+    cfg.ACTIVE_LEARNING.UTIL_LAMBDA = args.util_lambda
     cfg.ACTIVE_LEARNING.BUDGET_SIZE = args.budget
     cfg.INITIAL_SET.STR = args.initial_set_str
     cfg.ACTIVE_LEARNING.INITIAL_DELTA = args.initial_delta
@@ -714,7 +724,7 @@ if __name__ == "__main__":
         with open(cfg.ID_PATH, "rb") as f:
             loaded_ids = dill.load(f)
 
-        cfg.LSET_IDS = loaded_ids.tolist()
+        cfg.LSET_IDS = loaded_ids if isinstance(loaded_ids, list) else loaded_ids.tolist()
         cfg.INIT_L_NUM = len(loaded_ids)
     else:
         cfg.LSET_IDS = []
@@ -738,8 +748,12 @@ if __name__ == "__main__":
         cfg.GROUPS.GROUP_TYPE = group_type
 
         with open(group_assignment_path, "rb") as f:
-            loaded_group_assignments = dill.load(f)['clusters'] if group_type == 'nlcd' else dill.load(f)['assignments']
+            loaded_group_assignments = dill.load(f)['assignments']
 
         cfg.GROUPS.GROUP_ASSIGNMENT = loaded_group_assignments.tolist() if not isinstance(loaded_group_assignments, list) else loaded_group_assignments
+
+    cfg.ACTIVE_LEARNING.SIMILARITY_MATRIX_PATH = args.similarity_matrix_path
+
+    cfg.ACTIVE_LEARNING.DISTANCE_MATRIX_PATH = args.distance_matrix_path
 
     main(cfg)

@@ -14,8 +14,9 @@ plt.rcParams.update({'font.size': 16})
 
 custom_palette = {
     "random": "red",
-    "representative_nlcd": "#3b72a3",
-    "representative_state": "green",
+    "stratified_state": "#3b72a3",
+    "match_population_proportion_state": "green",
+    "poprisk_state": "gray", #edit this
     "greedycost": "gray",
     "typiclust": "#9467bd",         # purple from matplotlib default
     "inversetypiclust": "#ff7f0e"   # orange from matplotlib default
@@ -107,7 +108,7 @@ def plot_r2_vs_budget(
         plot_df = pd.concat([plot_df, pd.DataFrame(new_rows)], ignore_index=True)
 
     # Method ordering
-    method_order = ["random", "greedycost"] if cost_aware else ["random", "typiclust", "inversetypiclust", "representative_nlcd", "representative_state"]
+    method_order = ["random", "greedycost"] if cost_aware else ["random", "stratified_state", "match_population_proportion_state", "poprisk_state"]
     plot_df["Method"] = pd.Categorical(plot_df["Method"], categories=method_order, ordered=True)
     plot_df = plot_df.sort_values(by=["Method", x_val])
 
@@ -266,7 +267,7 @@ def plot_r2_vs_num_samples(
             zero_budget_df["Mean R2"],
             color="black",
             marker="x",
-            s=200,  # size of the marker
+            s=1000,  # size of the marker
             linewidths=3 
         )
 
@@ -288,14 +289,17 @@ def plot_r2_vs_num_samples(
             )
 
     # Adjust title and labels with improved font sizes
-    ax.set_title(f"Test R² vs Num Samples\nLabel = {label}\nInit Set: {init_set_str}", fontsize=18, fontweight='bold')
-    ax.set_xlabel("Number of Samples", fontsize=15)
-    ax.set_ylabel("Test R²", fontsize=15)
+    ax.set_title(f"Test R² vs Num Samples\nLabel = {label}\nInit Set: {init_set_str}", fontsize=48, fontweight='bold')
+    ax.set_xlabel("Number of Samples", fontsize=40)
+    ax.set_ylabel("Test R²", fontsize=40)
 
     # Adjust legend outside the plot to avoid overlap
     handles, labels = ax.get_legend_handles_labels()
     unique = dict(zip(labels, handles))  # later duplicates overwrite earlier ones
-    ax.legend(unique.values(), unique.keys(), title="Method", loc="upper left")
+    ax.legend(unique.values(), unique.keys(), title="Method", loc="upper left", fontsize=32)
+
+    from matplotlib.ticker import MultipleLocator
+    ax.yaxis.set_major_locator(MultipleLocator(0.05))
 
     # Apply y-limits if specified
     # plt.ylim(0.1, 0.5)
@@ -306,6 +310,8 @@ def plot_r2_vs_num_samples(
         ax.set_xscale('log')
 
     plt.tight_layout()
+    plt.xticks(fontsize=32)
+    plt.yticks(fontsize=32)
 
     plt.savefig(save_path, bbox_inches="tight", dpi=300)
     plt.close()
@@ -402,63 +408,81 @@ def plot_prob_map(latlons, probabilities, cmap="viridis", title="Probability Hea
 
 
 if __name__ == '__main__':
-    # base_path_template = '/home/libe2152/deep-al/results/plots/USAVARS/population/{type_str}_{num}_counties_10_radius/R2 vs budget.png'
-    # for type_str in ['density', 'clustered']:
-    #     plot_r2_grid(base_path_template, type_str, [25, 50, 75, 100])
-    #     plot_r2_grid(base_path_template, type_str, [125, 150, 175, 200])
-    
     dataset_name = "USAVARS"
-    labels = ['treecover', 'population']
-    cost_aware=True
-    methods_to_include=["random", "greedycost"]
+    labels = ['population', 'income', 'treecover']
+    cost_aware = False
+    methods_to_include = ["random", "match_population_proportion_state"]
     method_str = "_".join(methods_to_include)
 
+    points_per_cluster_list = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
+    desired_sizes = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+
     for task in labels:
-        for type_str in ['clustered', 'density']:
-            df_list = []
-            for num_counties in [25, 50, 75, 100, 125, 150, 175, 200]:
-                for radius in [10]:
-                    initial_set_str = f'{type_str}_{num_counties}_counties_{radius}_radius'
+        df_list = []
 
-                    script_dir = os.path.dirname(os.path.abspath(__file__))
-                    project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+        for num_points_per_cluster in points_per_cluster_list:
+            for desired_size in desired_sizes:
+                initial_set_str = f"state_strata_county_clusters_{num_points_per_cluster}_points_per_cluster_{desired_size}_size"
 
-                    csv_dir = os.path.join(project_root, f'results/csv/{dataset_name}/{task}/{initial_set_str}/cost_aware') if cost_aware else os.path.join(project_root, f'results/csv/{dataset_name}/{task}/{initial_set_str}')
-                    plot_dir = os.path.join(project_root, f'results/plots/{dataset_name}/{task}/{initial_set_str}/cost_aware') if cost_aware else os.path.join(project_root, f'results/plots/{dataset_name}/{task}/{initial_set_str}')
-                    os.makedirs(plot_dir, exist_ok=True)
+                csv_dir = os.path.join(
+                    project_root,
+                    f'results/csv/{dataset_name}/{task}/{initial_set_str}/cost_aware'
+                ) if cost_aware else os.path.join(
+                    project_root,
+                    f'results/csv/{dataset_name}/{task}/{initial_set_str}'
+                )
 
-                    csv_filepath = os.path.join(csv_dir, 'results.csv')
-                    plot_filepath = os.path.join(plot_dir, f'R2_vs_budget_{method_str}.png')
+                plot_dir = csv_dir  # same as csv_dir
+                os.makedirs(plot_dir, exist_ok=True)
 
-                    if not os.path.exists(csv_filepath):
-                        print(f"{csv_filepath} does not exist.")
-                        continue
+                csv_filepath = os.path.join(csv_dir, 'results.csv')
+                plot_filepath = os.path.join(plot_dir, f'R2_vs_budget_{method_str}.png')
 
+                if not os.path.exists(csv_filepath):
+                    print(f"Missing: {csv_filepath}")
+                    continue
+
+                try:
                     df = pd.read_csv(csv_filepath)
-                    df_list.append(df)
+                except Exception as e:
+                    print(f"Error reading {csv_filepath}: {e}")
+                    continue
 
-                    plot_r2_vs_budget(
-                        df,
-                        task,
-                        initial_set_str,
-                        plot_filepath,
-                        budget_bound=1000,
-                        methods_to_include=methods_to_include,
-                        log=False,
-                        cost_aware=cost_aware
-                    )
-            
-            if len(df_list) == 0:
-                continue
+                df_list.append(df)
 
-            plot_filepath = os.path.join(project_root, f"results/plots/{dataset_name}/{task}", f"{type_str}_{method_str}.png")
+                # # Plot R2 vs budget for each individual experiment
+                # try:
+                #     plot_r2_vs_budget(
+                #         df,
+                #         task,
+                #         initial_set_str,
+                #         plot_filepath,
+                #         budget_bound=1000,
+                #         methods_to_include=methods_to_include,
+                #         log=False,
+                #         cost_aware=cost_aware
+                #     )
+                # except Exception as e:
+                #     print(f"Plotting failed for {initial_set_str}: {e}")
 
+        # Final combined plot if we collected valid data
+        if df_list:
+            summary_plot_path = os.path.join(
+                project_root,
+                f"results/plots/{dataset_name}/{task}",
+                f"{method_str}_summary.png"
+            )
             plot_r2_vs_num_samples(
                 df_list,
                 task,
-                type_str,
-                plot_filepath,
-                budget_bound=200,
+                "state_strata_county_clusters",
+                summary_plot_path,
+                budget_bound=100,
                 methods_to_include=methods_to_include,
                 log=False
             )
+        else:
+            print(f"No valid dataframes found for task '{task}' — skipping summary plot.")

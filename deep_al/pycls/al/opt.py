@@ -13,21 +13,18 @@ from . import cost as np_cost
 UTILITY_FNS = {
     "random": util.random,
     "greedycost": util.greedy,
-    "poprisk": util.pop_risk
+    "poprisk": util.pop_risk,
+    "similarity": util.similarity,
+    "diversity": util.diversity
 }
-
 COST_FNS = {
     "uniform": cost.uniform,
-    "pointwise_by_region": cost.pointwise_by_region,
-    "pointwise_by_array": cost.pointwise_by_array,
-    "clustered_by_region": cost.clustered_by_region
+    "pointwise_by_EA": cost.pointwise_by_EA
 }
 
 NP_COST_FNS = {
     "uniform": np_cost.uniform,
-    "pointwise_by_region": np_cost.pointwise_by_region,
-    "pointwise_by_array": np_cost.pointwise_by_array,
-    "clustered_by_region": np_cost.clustered_by_region
+    "pointwise_by_EA": np_cost.pointwise_by_EA
 }
 
 class Opt:
@@ -38,7 +35,14 @@ class Opt:
         self.lSet = lSet
         self.uSet = uSet
         self.budget = budgetSize
+        self.set_unit_assignment()
         self._resolve_cost_func()
+
+    def set_unit_assignment(self):
+        relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
+        self.unit_assignment = self.cfg.UNITS.UNIT_ASSIGNMENT if self.cfg.UNITS.UNIT_ASSIGNMENT is not None else np.arange(len(relevant_indices))
+        self.units = np.unique(self.unit_assignment)
+        self.points_per_unit = self.cfg.UNITS.POINTS_PER_UNIT if self.cfg.UNITS.POINTS_PER_UNIT is not None else None #if none, we will select the whole unit
 
     def set_utility_func(self, utility_func_type):
         if utility_func_type not in UTILITY_FNS:
@@ -54,7 +58,16 @@ class Opt:
             relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
             self.group_assignment = self.group_assignment[relevant_indices]
 
-            self.utility_func = lambda s: util.pop_risk(s, self.group_assignment)
+            self.utility_func = lambda s: util.pop_risk(s, self.group_assignment, l=self.cfg.ACTIVE_LEARNING.UTIL_LAMBDA)
+        elif utility_func_type == "similarity":
+            assert self.cfg.ACTIVE_LEARNING.SIMILARITY_MATRIX_PATH is not None, "Need to specify similarity matrix path"
+            similarity_matrix = np.load(self.cfg.ACTIVE_LEARNING.SIMILARITY_MATRIX_PATH)['arr_0']
+            self.utility_func = lambda s: util.similarity(s, similarity_matrix)
+
+        elif utility_func_type == "diversity":
+            assert self.cfg.ACTIVE_LEARNING.DISTANCE_MATRIX_PATH is not None, "Need to specify distance matrix path"
+            distance_matrix = np.load(self.cfg.ACTIVE_LEARNING.DISTANCE_MATRIX_PATH)['arr_0']
+            self.utility_func = lambda s: util.diversity(s, distance_matrix)
         print(f"Utility function set to: {utility_func_type}")
 
     def _resolve_cost_func(self):
@@ -65,24 +78,7 @@ class Opt:
         self.cost_func = COST_FNS[cost_func_type]
         self.np_cost_func = NP_COST_FNS[cost_func_type]
 
-        if cost_func_type == "pointwise_by_region" or "clustered_by_region":
-            assert self.cfg.COST.REGION_ASSIGNMENT is not None, \
-                "Region Assignment must not be None for 'pointwise_by_region' cost function"
-            self.region_assignment = np.array(self.cfg.COST.REGION_ASSIGNMENT)
-
-            relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
-            labeled_inclusion_vector = np.concatenate([np.ones(len(self.lSet)), np.zeros(len(self.uSet))]).astype(bool)
-
-            self.region_assignment = self.region_assignment[relevant_indices] #need to align region assignment with indices
-
-            if cost_func_type == "pointwise_by_region":
-                self.cost_func = lambda s: cost.pointwise_by_region(s, self.region_assignment, labeled_inclusion_vector, labeled_region_cost=self.cfg.COST.LABELED_REGION_COST, new_region_cost=self.cfg.COST.NEW_REGION_COST)
-                self.np_cost_func = lambda s: np_cost.pointwise_by_region(s, self.region_assignment, labeled_inclusion_vector, labeled_region_cost=self.cfg.COST.LABELED_REGION_COST, new_region_cost=self.cfg.COST.NEW_REGION_COST)
-            elif cost_func_type == "clustered_by_region":
-                self.cost_func = lambda s: cost.clustered_by_region(s, self.region_assignment, labeled_inclusion_vector, labeled_region_cost=self.cfg.COST.LABELED_REGION_COST, new_region_cost=self.cfg.COST.NEW_REGION_COST)
-                self.np_cost_func = lambda s: np_cost.clustered_by_region(s, self.region_assignment, labeled_inclusion_vector, labeled_region_cost=self.cfg.COST.LABELED_REGION_COST, new_region_cost=self.cfg.COST.NEW_REGION_COST)
-
-        elif cost_func_type == "pointwise_by_array":
+        if cost_func_type == "pointwise_by_array":
             assert self.cfg.COST.ARRAY is not None, "Cost array must not be None for this cost function"
             self.cost_array = self.cfg.COST.ARRAY
 
@@ -93,23 +89,33 @@ class Opt:
         assert self.utility_func_type != "Random", "Please do not use the optimization function for random selection"
 
         relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
-        labeled_inclusion_vector = np.concatenate([np.ones(len(self.lSet)), np.zeros(len(self.uSet))]).astype(bool)
+        labeled_set = set(self.lSet)
 
-        n = len(relevant_indices)
+        #make labeled inclusion vector of units
+        unit_inclusion_vector = np.zeros(len(self.units), dtype=bool)
+
+        for i, u in enumerate(self.units):
+            unit_point_indices = relevant_indices[self.unit_assignment == u]
+            labeled_mask = np.array([idx in labeled_set for idx in unit_point_indices])
+            
+            if np.any(labeled_mask):
+                unit_inclusion_vector[i] = True
+
+        n = len(self.units)
         s = cp.Variable(n, nonneg=True)
 
-        assert s.shape == (len(relevant_indices),), f"s should be shape {(len(relevant_indices),)}, got {s.shape}"
-        assert labeled_inclusion_vector.shape == (len(relevant_indices),), f"labeled_inclusion_vector should be shape {(len(relevant_indices),)}, got {labeled_inclusion_vector.shape}"
+        assert s.shape == (len(relevant_indices),), f"s should be shape {(n,)}, got {s.shape}"
+        assert unit_inclusion_vector.shape == (n,), f"unit_inclusion_vector should be shape {(n,)}, got {unit_inclusion_vector.shape}"
 
         objective = self.utility_func(s)
         constraints = [
             0 <= s,
             s <= 1,
             self.cost_func(s) <= self.budget + len(self.lSet), #budget only accounts for additional points
-            s[labeled_inclusion_vector] == 1
+            s[unit_inclusion_vector] == 1
         ]
         prob = cp.Problem(cp.Maximize(objective), constraints)
-        prob.solve(solver = cp.MOSEK)
+        prob.solve(solver = cp.MOSEK, verbose=False)
 
         assert prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE], \
             f"Optimization failed. Status: {prob.status}"
@@ -126,43 +132,71 @@ class Opt:
         assert hasattr(self, "cost_func") and self.cost_func is not None, "Need to specify cost function"
 
         relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
-
-        all_indices = np.arange(len(relevant_indices))
-        existing_indices = np.arange(len(self.lSet))
-        non_existing_indices = np.setdiff1d(all_indices, existing_indices)
-
-        sample_inclusion_vector = np.concatenate([np.ones(len(self.lSet)), np.zeros(len(self.uSet))])
+        labeled_set = set(self.lSet)
         np.random.seed(self.seed)
 
-        if self.utility_func_type == "random":
-            permuted_indices = np.random.permutation(non_existing_indices)
+        #make labeled inclusion vector of units
+        #clean this up, can prob make this variable for the class
+        unit_index_map = {u: i for i, u in enumerate(self.units)}
+        unit_inclusion_vector = np.zeros(len(self.units), dtype=bool)
 
-            for i in range(len(permuted_indices)):
-                sample_inclusion_vector[permuted_indices[i]] = 1
-                if self.np_cost_func(sample_inclusion_vector) > self.budget + len(self.lSet):
-                    sample_inclusion_vector[permuted_indices[i]] = 0
+        unit_to_indices = {
+            u: relevant_indices[self.unit_assignment[relevant_indices] == u]
+            for u in self.units
+        }
+
+        for i, u in enumerate(self.units):
+            unit_point_indices = relevant_indices[self.unit_assignment == u]
+            labeled_mask = np.array([idx in labeled_set for idx in unit_point_indices])
+            
+            if np.any(labeled_mask):
+                unit_inclusion_vector[i] = True
+        labeled_units = self.units[unit_inclusion_vector]
+
+        if self.utility_func_type == "random":
+            non_labeled_units = np.setdiff1d(self.units, labeled_units)
+            permuted_units = np.random.permutation(non_labeled_units)
+
+            for u in permuted_units:
+                unit_inclusion_vector[unit_index_map[u]] = 1
+                if self.np_cost_func(unit_inclusion_vector) > self.budget + len(labeled_units):
+                    unit_inclusion_vector[unit_index_map[u]] = 0
                     break
         else:
             assert hasattr(self, "utility_func") and self.utility_func is not None, "Need to specify utility function"
 
             probs = self.solve_opt()
-            for i in range(len(relevant_indices)):
-                draw = np.random.choice([0,1], p=[1-probs[i], probs[i]])
-                sample_inclusion_vector[i] = draw
+            for i in range(len(self.units)):
+                if unit_inclusion_vector[i] == 0:
+                    draw = np.random.choice([0, 1], p=[1 - probs[i], probs[i]])
+                    unit_inclusion_vector[i] = draw
         
-        selected = np.where(sample_inclusion_vector == 1)[0][len(self.lSet):]
+        selected_units = self.units[unit_inclusion_vector.astype(bool)]
+        selected_units = np.setdiff1d(selected_units, labeled_units)
 
-        total_sample_cost = self.np_cost_func(sample_inclusion_vector)
+        activeSet = []
+
+        for u in selected_units:
+            available_idxs = unit_to_indices[u]
+            unlabeled_idxs = [idx for idx in available_idxs if idx in self.uSet]
+
+            if len(unlabeled_idxs) <= self.points_per_unit or self.points_per_unit is None:
+                selected_points = unlabeled_idxs
+            else:
+                selected_points = np.random.choice(unlabeled_idxs, size=self.points_per_unit, replace=False)
+
+            activeSet.extend(selected_points)
+
+        # Ensure we include no overlap with already-labeled
+        activeSet = np.array(sorted(set(activeSet)))
+        remainSet = np.array(sorted(set(self.uSet) - set(activeSet)))
+        total_sample_cost = self.np_cost_func(unit_inclusion_vector)
+
         print(f"Total Sample Cost: {total_sample_cost}")
-
-        assert len(np.intersect1d(selected, existing_indices)) == 0, 'should be new samples'
-        activeSet = relevant_indices[selected]
-        remainSet = np.array(sorted(list(set(self.uSet) - set(activeSet))))
-
-        print(f'Finished the selection of {len(activeSet)} samples.')
-        print(f'Active set is {activeSet}')
+        print(f"Finished the selection of {len(activeSet)} samples.")
+        print(f"Active set is {activeSet}")
 
         if self.utility_func_type == "random":
-            return activeSet, remainSet, total_sample_cost
+            return activeSet, remainSet, self.np_cost_func(unit_inclusion_vector)
         else:
-            return activeSet, remainSet, total_sample_cost, probs, relevant_indices
+            return activeSet, remainSet, total_sample_cost, probs, self.units

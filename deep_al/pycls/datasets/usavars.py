@@ -137,7 +137,7 @@ class USAVars(NonGeoDataset):
         else:
             self.split = 'test'
 
-        assert label in ('treecover', 'elevation', 'population'), "Label information does not exist."
+        assert label in ('treecover', 'elevation', 'population', 'income'), "Label information does not exist."
 
         self.label = label
         self.label_dfs = {
@@ -215,6 +215,7 @@ class USAVars(NonGeoDataset):
 
         # Check if the user requested to download the dataset
         if not self.download:
+            from IPython import embed; embed()
             print("Raising DatasetNotFoundError")
             raise DatasetNotFoundError(self)
 

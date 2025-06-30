@@ -265,6 +265,10 @@ class Data:
             usavars_el = USAVars(root='/share/usavars', isTrain=isTrain, label='elevation')
             return usavars_el, len(usavars_el)
 
+        elif self.dataset == 'USAVARS_INC':
+            usavars_inc = USAVars(root='/share/usavars', isTrain=isTrain, label='income')
+            return usavars_inc, len(usavars_inc)
+
         else:
             print("Either the specified {} dataset is not added or there is no if condition in getDataset function of Data class".format(self.dataset))
             logger.info("Either the specified {} dataset is not added or there is no if condition in getDataset function of Data class".format(self.dataset))
