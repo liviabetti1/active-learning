@@ -13,14 +13,17 @@ sns.set_theme(style="whitegrid", context="talk", font_scale=1.3)
 plt.rcParams.update({'font.size': 16})
 
 custom_palette = {
-    "random": "red",
-    "stratified_state": "#3b72a3",
-    "match_population_proportion_state": "green",
-    "poprisk_state": "gray", #edit this
-    "greedycost": "gray",
-    "typiclust": "#9467bd",         # purple from matplotlib default
-    "inversetypiclust": "#ff7f0e"   # orange from matplotlib default
+    "random": "#D55E00",                            # vermilion (orange-red)
+    "stratified_state": "#0072B2",                  # blue
+    "match_population_proportion_state": "#009E73", # bluish green
+    "match_population_proportion_nlcd": "#CC79A7",  # reddish purple
+    "stratified_nlcd": "#E69F00",                   # orange
+    "poprisk_state": "#F0E442",                     # yellow
+    "poprisk_nlcd": "#56B4E9",                      # light blue
+    "greedycost": "#999999",                        # gray
+    "similarity": "#882255"                         # burgundy
 }
+
 
 def nice_initial_set_desc(desc):
     """
@@ -172,7 +175,7 @@ def plot_r2_vs_budget(
     ax.legend(title="Methods", loc='upper left', fontsize=12)
 
     # Apply y-limits if specified
-    # plt.ylim(0.1, 0.5)
+    #plt.ylim(0.2, 0.6)
 
     ax.grid(True)
 
@@ -196,13 +199,16 @@ def plot_r2_vs_num_samples(
 ):
 
     plot_df_list = []
-    plt.figure(figsize=(36, 30))
+    fig, ax = plt.subplots(figsize=(36, 30))
 
     for df in df_list:
         if methods_to_include:
             df = df[df["Method"].isin(methods_to_include)]
 
         df = df[df['Budget'] <= budget_bound]
+
+        if df.empty or df["Test R2"].isna().any():
+            continue
 
         # Group and aggregate separately
         grouped= df.groupby(["Method", "Budget", "Initial Test R2", "Initial Set Size"])["Test R2"]
@@ -302,7 +308,7 @@ def plot_r2_vs_num_samples(
     ax.yaxis.set_major_locator(MultipleLocator(0.05))
 
     # Apply y-limits if specified
-    # plt.ylim(0.1, 0.5)
+    #plt.ylim(0.2, 0.6)
 
     ax.grid(True)
 
@@ -312,7 +318,8 @@ def plot_r2_vs_num_samples(
     plt.tight_layout()
     plt.xticks(fontsize=32)
     plt.yticks(fontsize=32)
-
+    
+    print(f"Saving to {save_path}")
     plt.savefig(save_path, bbox_inches="tight", dpi=300)
     plt.close()
 
@@ -409,11 +416,9 @@ def plot_prob_map(latlons, probabilities, cmap="viridis", title="Probability Hea
 
 if __name__ == '__main__':
     dataset_name = "USAVARS"
-    labels = ['population', 'income', 'treecover']
+    labels = ['population', 'treecover', 'income']
     cost_aware = False
-    methods_to_include = ["random", "match_population_proportion_state"]
-    method_str = "_".join(methods_to_include)
-
+    #methods_to_include = ["random", "poprisk_nlcd"]
     points_per_cluster_list = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
     desired_sizes = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
 
@@ -421,11 +426,98 @@ if __name__ == '__main__':
     project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
 
     for task in labels:
-        df_list = []
+        for method in ["stratified_state", "stratified_nlcd", "match_population_proportion_state", "match_population_proportion_nlcd", "poprisk_state", "poprisk_nlcd", "similarity"]:
+            methods_to_include = ["random", method]
+            method_str = "_".join(methods_to_include)
 
-        for num_points_per_cluster in points_per_cluster_list:
+            df_list = []
+
+            for num_points_per_cluster in points_per_cluster_list:
+                for desired_size in desired_sizes:
+                    initial_set_str = f"state_strata_county_clusters_{num_points_per_cluster}_points_per_cluster_{desired_size}_size"
+
+                    csv_dir = os.path.join(
+                        project_root,
+                        f'results/csv/{dataset_name}/{task}/{initial_set_str}/cost_aware'
+                    ) if cost_aware else os.path.join(
+                        project_root,
+                        f'results/csv/{dataset_name}/{task}/{initial_set_str}'
+                    )
+
+                    plot_dir = csv_dir  # same as csv_dir
+                    os.makedirs(plot_dir, exist_ok=True)
+
+                    csv_filepath = os.path.join(csv_dir, 'results.csv')
+                    plot_filepath = os.path.join(plot_dir, f'R2_vs_budget_{method_str}.png')
+
+                    if not os.path.exists(csv_filepath):
+                        print(f"Missing: {csv_filepath}")
+                        continue
+
+                    try:
+                        df = pd.read_csv(csv_filepath)
+                    except Exception as e:
+                        print(f"Error reading {csv_filepath}: {e}")
+                        continue
+
+                    df_list.append(df)
+
+                    # # Plot R2 vs budget for each individual experiment
+                    # try:
+                    #     plot_r2_vs_budget(
+                    #         df,
+                    #         task,
+                    #         initial_set_str,
+                    #         plot_filepath,
+                    #         budget_bound=1000,
+                    #         methods_to_include=methods_to_include,
+                    #         log=False,
+                    #         cost_aware=cost_aware
+                    #     )
+                    # except Exception as e:
+                    #     print(f"Plotting failed for {initial_set_str}: {e}")
+
+            # Final combined plot if we collected valid data
+            initial_set_str = "state_strata_county_clusters"
+            if df_list:
+                summary_plot_dir = os.path.join(
+                    project_root,
+                    f"results/plots/{dataset_name}/{task}",
+                    f"{initial_set_str}"
+                )
+                os.makedirs(summary_plot_dir, exist_ok=True)
+
+                summary_plot_path = os.path.join(
+                    summary_plot_dir,
+                    f"{method_str}_summary.png"
+                )
+            
+                plot_r2_vs_num_samples(
+                    df_list,
+                    task,
+                    initial_set_str,
+                    summary_plot_path,
+                    budget_bound=100,
+                    methods_to_include=methods_to_include,
+                    log=False
+                )
+            else:
+                print(f"No valid dataframes found for task '{task}' — skipping summary plot.")
+
+    desired_sizes = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+
+    for task in labels:
+        for method in ["stratified_state", "stratified_nlcd", "match_population_proportion_state", "match_population_proportion_nlcd", "poprisk_state", "poprisk_nlcd", "similarity"]:
+            methods_to_include = ["random", method]
+            method_str = "_".join(methods_to_include)
+
+            df_list = []
+
             for desired_size in desired_sizes:
-                initial_set_str = f"state_strata_county_clusters_{num_points_per_cluster}_points_per_cluster_{desired_size}_size"
+                initial_set_str = f"top50_urban_areas_{desired_size}_points"
 
                 csv_dir = os.path.join(
                     project_root,
@@ -468,21 +560,30 @@ if __name__ == '__main__':
                 # except Exception as e:
                 #     print(f"Plotting failed for {initial_set_str}: {e}")
 
-        # Final combined plot if we collected valid data
-        if df_list:
-            summary_plot_path = os.path.join(
-                project_root,
-                f"results/plots/{dataset_name}/{task}",
-                f"{method_str}_summary.png"
-            )
-            plot_r2_vs_num_samples(
-                df_list,
-                task,
-                "state_strata_county_clusters",
-                summary_plot_path,
-                budget_bound=100,
-                methods_to_include=methods_to_include,
-                log=False
-            )
-        else:
-            print(f"No valid dataframes found for task '{task}' — skipping summary plot.")
+            # Final combined plot if we collected valid data
+            initial_set_str = "top50_urban_areas"
+            if df_list:
+                summary_plot_dir = os.path.join(
+                    project_root,
+                    f"results/plots/{dataset_name}/{task}",
+                    f"{initial_set_str}"
+                )
+                os.makedirs(summary_plot_dir, exist_ok=True)
+
+                summary_plot_path = os.path.join(
+                    summary_plot_dir,
+                    f"{method_str}_summary.png"
+                )
+
+                plot_r2_vs_num_samples(
+                    df_list,
+                    task,
+                    initial_set_str,
+                    summary_plot_path,
+                    budget_bound=100,
+                    methods_to_include=methods_to_include,
+                    log=False
+                )
+            else:
+                print(f"No valid dataframes found for task '{task}' — skipping summary plot.")
+

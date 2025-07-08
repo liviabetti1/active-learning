@@ -241,7 +241,7 @@ _C.DATASET.VAL_RATIO = 0.1
 # Data augmentation methods - 'simclr', 'randaug', 'hflip'
 _C.DATASET.AUG_METHOD = 'hflip' 
 # Accepted Datasets
-_C.DATASET.ACCEPTED = ['MNIST','SVHN','CIFAR10','CIFAR100','TINYIMAGENET', 'IMBALANCED_CIFAR10', 'IMBALANCED_CIFAR100', 'IMAGENET50', 'IMAGENET100', 'IMAGENET200', 'USAVARS_POP', 'USAVARS_TC', 'USAVARS_EL', 'USAVARS_INC']
+_C.DATASET.ACCEPTED = ['USAVARS_POP', 'USAVARS_TC', 'USAVARS_EL', 'USAVARS_INC', 'INDIA_SECC']
 
 # #-------------------------------------------------------------------------------#
 # #  INITIAL SET options
@@ -254,11 +254,9 @@ _C.INITIAL_SET.STR = None
 # #-------------------------------------------------------------------------------#
 _C.COST = CN()
 _C.COST.FN = None
-_C.COST.CATEGORY = None
+_C.COST.NAME = None
 _C.COST.ARRAY = None
-_C.COST.REGION_ASSIGNMENT = None
-_C.COST.LABELED_REGION_COST = None
-_C.COST.NEW_REGION_COST = None
+_C.COST.UNIT_COST = None
 
 # #-------------------------------------------------------------------------------#
 # #  GROUP options

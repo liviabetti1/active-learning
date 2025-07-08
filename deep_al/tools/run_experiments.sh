@@ -55,7 +55,7 @@ run_experiment() {
 declare -A LABEL_MAP=( ["POP"]="population" ["INC"]="income" ["TC"]="treecover" )
 
 # === Main experiment loop ===
-for LABEL_SHORT in POP TC INC; do
+for LABEL_SHORT in TC INC; do
     LABEL_LONG=${LABEL_MAP[$LABEL_SHORT]}
     CFG_NAME="RIDGE_${LABEL_SHORT}"
     BASE_DIR="/home/libe2152/deep-al/usavars/${LABEL_LONG}"

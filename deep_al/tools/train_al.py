@@ -81,13 +81,16 @@ def argparser():
 
     parser.add_argument('--initial_set_str', default=None, type=str)
     parser.add_argument('--cost_func', default=None, type=str)
+    parser.add_argument('--cost_name', default=None, type=str)
     parser.add_argument('--cost_array_path', default=None, type=str)
-    parser.add_argument('--region_assignment_path', default=None, type=str)
-    parser.add_argument('--labeled_region_cost', default=1, type=int)
-    parser.add_argument('--new_region_cost', default=2, type=int)
 
     parser.add_argument('--group_type', default=None, type=str)
     parser.add_argument('--group_assignment_path', default=None, type=str)
+
+    parser.add_argument('--unit_type', default=None, type=str)
+    parser.add_argument('--points_per_unit', default=None, type=int)
+    parser.add_argument('--unit_assignment_path', default=None, type=str)
+    parser.add_argument('--unit_cost_path', default=None, type=str)
 
     parser.add_argument('--util_lambda', default=None, type=float, help='Value of lambda in pop risk utility function')
     parser.add_argument('--similarity_matrix_path', default=None, type=str)
@@ -159,9 +162,9 @@ def main(cfg):
     else:
         if cfg.ACTIVE_LEARNING.COST_AWARE:
             if cfg.GROUPS.GROUP_TYPE is not None:
-                exp_dir = f'{cfg.INITIAL_SET.STR}/cost_aware/{cfg.COST.FN}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/{cfg.GROUPS.GROUP_TYPE}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
+                exp_dir = f'{cfg.INITIAL_SET.STR}/cost_aware/{cfg.COST.NAME}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/{cfg.GROUPS.GROUP_TYPE}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
             else:
-                exp_dir = f'{cfg.INITIAL_SET.STR}/cost_aware/{cfg.COST.FN}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
+                exp_dir = f'{cfg.INITIAL_SET.STR}/cost_aware/{cfg.COST.NAME}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
         else:
             if cfg.GROUPS.GROUP_TYPE is not None:
                 exp_dir = f'{cfg.INITIAL_SET.STR}/{cfg.ACTIVE_LEARNING.SAMPLING_FN}/{cfg.GROUPS.GROUP_TYPE}/budget_{cfg.ACTIVE_LEARNING.BUDGET_SIZE}/seed_{cfg.RNG_SEED}'
@@ -708,7 +711,7 @@ if __name__ == "__main__":
     cfg.ACTIVE_LEARNING.SAMPLING_FN = args.al
     cfg.ACTIVE_LEARNING.UTIL_LAMBDA = args.util_lambda
     cfg.ACTIVE_LEARNING.BUDGET_SIZE = args.budget
-    cfg.INITIAL_SET.STR = args.initial_set_str
+    cfg.INITIAL_SET.STR = args.initial_set_str if args.initial_set_str is not None else "empty_intial_set"
     cfg.ACTIVE_LEARNING.INITIAL_DELTA = args.initial_delta
     cfg.RNG_SEED = args.seed
     cfg.ACTIVE_LEARNING.MAX_ITER = args.max_iter
@@ -717,7 +720,7 @@ if __name__ == "__main__":
     cfg.ACTIVE_LEARNING.K_LOGISTIC = args.k_logistic
 
     cfg.COST.FN = args.cost_func
-    cfg.COST.PATH = args.cost_array_path
+    cfg.COST.NAME = args.cost_name if args.cost_name is not None else cfg.COST.FN
 
     cfg.ID_PATH = args.id_path
     if cfg.ID_PATH is not None:
@@ -730,18 +733,8 @@ if __name__ == "__main__":
         cfg.LSET_IDS = []
         cfg.INIT_L_NUM = 0
 
-    region_assignment_path = args.region_assignment_path
-
-    if region_assignment_path is not None:
-        with open(region_assignment_path, "rb") as f:
-            loaded_region_assignments = dill.load(f)['assignments']
-
-        cfg.COST.REGION_ASSIGNMENT = loaded_region_assignments
-
-        cfg.COST.LABELED_REGION_COST = args.labeled_region_cost
-        cfg.COST.NEW_REGION_COST = args.new_region_cost
-
     group_assignment_path = args.group_assignment_path
+    unit_assignment_path = args.unit_assignment_path
 
     if group_assignment_path is not None:
         group_type = args.group_type
@@ -751,6 +744,28 @@ if __name__ == "__main__":
             loaded_group_assignments = dill.load(f)['assignments']
 
         cfg.GROUPS.GROUP_ASSIGNMENT = loaded_group_assignments.tolist() if not isinstance(loaded_group_assignments, list) else loaded_group_assignments
+
+    if unit_assignment_path is not None:
+        unit_type = args.unit_type
+        cfg.UNITS.UNIT_TYPE = unit_type
+
+        with open(unit_assignment_path, "rb") as f:
+            loaded_unit_assignments = dill.load(f)['assignments']
+
+        cfg.UNITS.UNIT_ASSIGNMENT = loaded_unit_assignments.tolist() if not isinstance(loaded_unit_assignments, list) else loaded_unit_assignments
+        cfg.UNITS.POINTS_PER_UNIT = args.points_per_unit if args.points_per_unit is not None else None
+
+        if args.unit_cost_path is not None:
+            with open(args.unit_cost_path, "rb") as f:
+                cost_dict = dill.load(f)
+
+            cfg.COST.UNIT_COST = [cost_dict] # just to store in the config file
+
+    if args.cost_array_path is not None:
+        with open(args.cost_array_path, "rb") as f:
+            cost_array = dill.load(f)['costs']
+
+        cfg.COST.ARRAY = cost_array.tolist() if not isinstance(cost_array, list) else cost_array
 
     cfg.ACTIVE_LEARNING.SIMILARITY_MATRIX_PATH = args.similarity_matrix_path
 

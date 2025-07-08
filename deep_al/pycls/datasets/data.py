@@ -17,6 +17,7 @@ from pycls.datasets.imbalanced_cifar import IMBALANCECIFAR10, IMBALANCECIFAR100
 from pycls.datasets.sampler import IndexedSequentialSampler
 from pycls.datasets.tiny_imagenet import TinyImageNet
 from pycls.datasets.usavars import USAVars
+from pycls.datasets.india_secc import IndiaSECC
 
 logger = lu.get_logger(__name__)
 
@@ -269,6 +270,10 @@ class Data:
             usavars_inc = USAVars(root='/share/usavars', isTrain=isTrain, label='income')
             return usavars_inc, len(usavars_inc)
 
+        elif self.dataset == "INDIA_SECC":
+            india_secc = IndiaSECC(root='/share/india_secc', isTrain=isTrain)
+            return india_secc, len(india_secc)
+
         else:
             print("Either the specified {} dataset is not added or there is no if condition in getDataset function of Data class".format(self.dataset))
             logger.info("Either the specified {} dataset is not added or there is no if condition in getDataset function of Data class".format(self.dataset))
@@ -339,8 +344,17 @@ class Data:
         np.save(f'{save_dir}/valSet.npy', valSet)
         
         return f'{save_dir}/lSet.npy', f'{save_dir}/uSet.npy', f'{save_dir}/valSet.npy'
-    
+
     def makeLUVSets_from_ids(self, ids, data, save_dir):
+        if self.dataset.startswith("USAVARS"):
+            return self.makeLUVSets_from_ids_usavars(ids, data, save_dir)
+        elif self.dataset == "INDIA_SECC":
+            return self.makeLUVSets_from_ids_india_secc(ids, data, save_dir)
+        else:
+            raise ValueError("method not yet implemented")
+        return
+    
+    def makeLUVSets_from_ids_usavars(self, ids, data, save_dir):
         """
             For USAVars, make labeled set from ids.
         """
@@ -352,6 +366,47 @@ class Data:
         valSet = []
 
         ids_to_idxs = {data[i][3]: i for i in range(len(data))}
+        labeled_idxs = [ids_to_idxs[id_] for id_ in ids]
+        unlabeled_idxs = [i for id_, i in ids_to_idxs.items() if id_ not in ids]
+        
+        #Check there should be no overlap with train and val data
+        # assert train_split_ratio + val_split_ratio < 1.0, "Validation data over laps with train data as last train index is {} and last val index is {}. \
+        #     The program expects val index > train index. Please satisfy the constraint: train_split_ratio + val_split_ratio < 1.0; currently it is {} + {} is not < 1.0 => {} is not < 1.0"\
+        #         .format(train_splitIdx, val_splitIdx, train_split_ratio, val_split_ratio, train_split_ratio + val_split_ratio)
+        
+        n_dataPoints = len(data)
+        all_idx = [i for i in range(n_dataPoints)]
+
+        lSet = [all_idx[i] for i in labeled_idxs]
+        uSet = [all_idx[i] for i in unlabeled_idxs]
+        valSet = [all_idx[i] for i in []]
+
+        # print("=============================")
+        # print("lSet len: {}, uSet len: {} and valSet len: {}".format(len(lSet),len(uSet),len(valSet)))
+        # print("=============================")
+        
+        lSet = np.array(lSet, dtype=np.ndarray)
+        uSet = np.array(uSet, dtype=np.ndarray)
+        valSet = np.array(valSet, dtype=np.ndarray)
+        
+        np.save(f'{save_dir}/lSet.npy', lSet)
+        np.save(f'{save_dir}/uSet.npy', uSet)
+        np.save(f'{save_dir}/valSet.npy', valSet)
+        
+        return f'{save_dir}/lSet.npy', f'{save_dir}/uSet.npy', f'{save_dir}/valSet.npy'
+
+    def makeLUVSets_from_ids_india_secc(self, ids, data, save_dir):
+        """
+            For India_SECC, make labeled set from ids.
+        """
+        print("Sampling initial pool from IDS")
+        assert self.dataset in self.datasets_accepted, "Sorry the dataset {} is not supported. Currently we support {}".format(self.dataset, self.datasets_accepted)
+
+        lSet = []
+        uSet = []
+        valSet = []
+
+        ids_to_idxs = {data.ids[i]:i for i in range(len(data))}
         labeled_idxs = [ids_to_idxs[id_] for id_ in ids]
         unlabeled_idxs = [i for id_, i in ids_to_idxs.items() if id_ not in ids]
         

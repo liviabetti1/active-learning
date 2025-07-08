@@ -62,6 +62,10 @@ def iterate_log_files_and_extract_data(dataset_name, task, initial_set_str, cost
                 if file != 'stdout.log':
                     continue
 
+                if not cost_aware:
+                    if "cost_aware" in root and "uniform" not in root:
+                        continue
+
                 file_path = os.path.join(root, file)
                 parts = file_path.split(os.sep)
 
@@ -217,7 +221,7 @@ def _write_csv_from_logs(dataset_name, task, initial_set_str, cost_aware):
 
 if __name__ == '__main__':
     dataset_name = "USAVARS"
-    labels = ['population']
+    labels = ['population', 'treecover', 'income']
     cost_aware = False
 
 
