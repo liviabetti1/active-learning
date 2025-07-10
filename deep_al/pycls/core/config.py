@@ -26,6 +26,10 @@ _C.NUM_GPUS = 1
 _C.OUT_DIR = 'output'
 # Experiment directory
 _C.EXP_DIR = ''
+# Higher Level Experiment directory without seed
+_C.EXP_ROOT = ''
+# Initial Set Directory
+_C.INITIAL_SET_DIR = ''
 # Episode directory
 _C.EPISODE_DIR = ''
 # Config destination (in OUT_DIR)

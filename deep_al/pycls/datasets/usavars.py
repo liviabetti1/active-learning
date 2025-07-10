@@ -204,18 +204,17 @@ class USAVars(NonGeoDataset):
         split_pathname = os.path.join(self.root, '*_split.txt')
 
         csv_split_count = (len(glob.glob(csv_pathname)), len(glob.glob(split_pathname)))
-        if glob.glob(pathname) and csv_split_count == (7, 3):
+        if glob.glob(pathname) and csv_split_count == (8, 3):
             return
 
         # Check if the zip files have already been downloaded
         pathname = os.path.join(self.root, self.dirname + '.zip')
-        if glob.glob(pathname) and csv_split_count == (7, 3):
+        if glob.glob(pathname) and csv_split_count == (8, 3):
             self._extract()
             return
 
         # Check if the user requested to download the dataset
         if not self.download:
-            from IPython import embed; embed()
             print("Raising DatasetNotFoundError")
             raise DatasetNotFoundError(self)
 

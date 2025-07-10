@@ -53,24 +53,25 @@ class IndiaSECC(NonGeoDataset):
 
         self._check_for_dataset()
 
-        self.X, self.y, self.ids, self.geometries = self._load_features_and_labels()
+        if not self._try_load_from_pickle():
+            self.X, self.y, self.ids, self.geometries = self._load_features_and_labels()
 
-        #make sure splits directory exists
-        splits_dir = self.root / "splits"
-        splits_dir.mkdir(exist_ok=True, parents=True)
+            #make sure splits directory exists
+            splits_dir = self.root / "splits"
+            splits_dir.mkdir(exist_ok=True, parents=True)
 
-        #check if splits exist; if not, create them
-        train_split_file = splits_dir / "train_condensed_shrug_ids.csv"
-        test_split_file = splits_dir / "test_condensed_shrug_ids.csv"
+            #check if splits exist; if not, create them
+            train_split_file = splits_dir / "train_condensed_shrug_ids.csv"
+            test_split_file = splits_dir / "test_condensed_shrug_ids.csv"
 
-        if not (train_split_file.exists() and test_split_file.exists()):
-            self._make_and_save_splits()
+            if not (train_split_file.exists() and test_split_file.exists()):
+                self._make_and_save_splits()
 
-        self.split_mask = self._filter_split()
-        self.X = self.X[self.split_mask]
-        self.y = self.y[self.split_mask]
-        self.ids = self.ids[self.split_mask]
-        self.geometries = self.geometries[self.split_mask]
+            self.split_mask = self._filter_split()
+            self.X = self.X[self.split_mask]
+            self.y = self.y[self.split_mask]
+            self.ids = self.ids[self.split_mask]
+            self.geometries = self.geometries[self.split_mask]
 
     def __getitem__(self, index: int) -> dict[str, Tensor]:
         """Return an index within the dataset.
@@ -125,6 +126,11 @@ class IndiaSECC(NonGeoDataset):
 
     def _filter_split(self):
         split_condensed_shrug_ids = pd.read_csv(self.root / f"splits/{self.split}_condensed_shrug_ids.csv", header=None)[0].values
+
+        missing_ids = set(split_condensed_shrug_ids) - set(self.ids)
+        if missing_ids:
+            print(f"Warning: {len(missing_ids)} IDs from {self.split}_split not in dataset")
+
         mask = np.isin(self.ids, split_condensed_shrug_ids)
         return mask
 
@@ -150,3 +156,36 @@ class IndiaSECC(NonGeoDataset):
         for file in required_files:
             if not file.exists():
                 raise DatasetNotFoundError(f"Required file not found: {file}")
+
+    def _try_load_from_pickle(self, pkl_name="India_SECC_with_splits_4000.pkl") -> bool:
+        """
+        Attempt to load X, y, ids, and geometries from a pickle file.
+
+        Args:
+            pkl_name (str): Name of the pickle file to load from.
+
+        Returns:
+            bool: True if data was successfully loaded from pickle, False otherwise.
+        """
+        import dill 
+
+        pkl_path = self.root / "splits" / pkl_name
+        if not pkl_path.exists():
+            return False
+
+        print(f"Loading saved data from {pkl_path}")
+        with open(pkl_path, "rb") as f:
+            data = dill.load(f)
+
+        if self.split == "train":
+            self.X = data["X_train"]
+            self.y = data["y_train"]
+            self.ids = data["ids_train"]
+            self.geometries = data["geometries_train"]
+        else:
+            self.X = data["X_test"]
+            self.y = data["y_test"]
+            self.ids = data["ids_test"]
+            self.geometries = data["geometries_test"]
+
+        return True

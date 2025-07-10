@@ -36,13 +36,15 @@ class Opt:
         self.seed = self.cfg['RNG_SEED']
         self.lSet = lSet.astype(int)
         self.uSet = uSet.astype(int)
+        self.relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
         self.budget = budgetSize
         self.set_unit_assignment()
         self._resolve_cost_func()
 
     def set_unit_assignment(self):
-        relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
-        self.unit_assignment = np.array(self.cfg.UNITS.UNIT_ASSIGNMENT) if self.cfg.UNITS.UNIT_ASSIGNMENT is not None else np.arange(len(relevant_indices))
+        self.unit_assignment = np.array(self.cfg.UNITS.UNIT_ASSIGNMENT) if self.cfg.UNITS.UNIT_ASSIGNMENT is not None else np.arange(len(self.relevant_indices))
+        self.unit_assignment = self.unit_assignment[self.relevant_indices]
+
         self.units = np.unique(self.unit_assignment)
         self.points_per_unit = self.cfg.UNITS.POINTS_PER_UNIT if self.cfg.UNITS.POINTS_PER_UNIT is not None else None #if none, we will select the whole unit
 
@@ -57,18 +59,21 @@ class Opt:
 
             self.group_assignment = np.array(self.cfg.GROUPS.GROUP_ASSIGNMENT)
 
-            relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
-            self.group_assignment = self.group_assignment[relevant_indices]
+            self.group_assignment = self.group_assignment[self.relevant_indices]
 
             self.utility_func = lambda s: util.pop_risk(s, self.unit_assignment, self.group_assignment, l=self.cfg.ACTIVE_LEARNING.UTIL_LAMBDA)
         elif utility_func_type == "similarity":
             assert self.cfg.ACTIVE_LEARNING.SIMILARITY_MATRIX_PATH is not None, "Need to specify similarity matrix path"
             similarity_matrix = np.load(self.cfg.ACTIVE_LEARNING.SIMILARITY_MATRIX_PATH)['arr_0']
+            similarity_matrix = similarity_matrix[np.ix_(self.relevant_indices, self.relevant_indices)]
+
             self.utility_func = lambda s: util.similarity(s, similarity_matrix)
 
         elif utility_func_type == "diversity":
             assert self.cfg.ACTIVE_LEARNING.DISTANCE_MATRIX_PATH is not None, "Need to specify distance matrix path"
             distance_matrix = np.load(self.cfg.ACTIVE_LEARNING.DISTANCE_MATRIX_PATH)['arr_0']
+            distance_matrix = distance_matrix[np.ix_(self.relevant_indices, self.relevant_indices)]
+
             self.utility_func = lambda s: util.diversity(s, distance_matrix)
         print(f"Utility function set to: {utility_func_type}")
 
@@ -89,6 +94,7 @@ class Opt:
                 self.cost_array = np.array([self.cost_dict[u] for u in self.units])
             elif self.cfg.COST.ARRAY is not None:
                 self.cost_array = np.array(self.cfg.COST.ARRAY)
+                self.cost_array = self.cost_array[self.relevant_indices]
             else:
                 raise(AssertionError)
 
@@ -98,13 +104,12 @@ class Opt:
 
         elif cost_func_type == "unit_aware_pointwise_cost":
             self.cost_domain = "point"
-            relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
-            labeled_indices = np.array([int(idx in set(self.lSet)) for idx in relevant_indices])
+            labeled_indices = np.array([int(idx in set(self.lSet)) for idx in self.relevant_indices])
 
-            self.units = np.arange(len(relevant_indices))
+            self.units = np.arange(len(self.relevant_indices))
 
             labeled_units = set(self.unit_assignment[self.lSet])
-            unit_labeled_array = [self.unit_assignment[i] in labeled_units for i in range(len(relevant_indices))]
+            unit_labeled_array = [self.unit_assignment[i] in labeled_units for i in range(len(self.relevant_indices))]
 
             self.cost_func = lambda s: cost.unit_aware_pointwise_cost(s, labeled_indices, unit_labeled_array)
             self.np_cost_func = lambda s: np_cost.unit_aware_pointwise_cost(s, labeled_indices, unit_labeled_array)
@@ -112,7 +117,6 @@ class Opt:
     def solve_opt(self):
         assert self.utility_func_type != "Random", "Please do not use the optimization function for random selection"
 
-        relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
         labeled_set = set(self.lSet)
 
         #make labeled inclusion vector of units
@@ -120,7 +124,7 @@ class Opt:
 
         if self.cost_domain == "unit":
             for i, u in enumerate(self.units):
-                unit_point_indices = relevant_indices[self.unit_assignment == u]
+                unit_point_indices = self.relevant_indices[self.unit_assignment == u]
                 labeled_mask = np.array([idx in labeled_set for idx in unit_point_indices])
                 
                 if np.any(labeled_mask):
@@ -134,14 +138,17 @@ class Opt:
 
         assert s.shape == (n,), f"s should be shape {(n,)}, got {s.shape}"
         assert unit_inclusion_vector.shape == (n,), f"unit_inclusion_vector should be shape {(n,)}, got {unit_inclusion_vector.shape}"
-
+        
         objective = self.utility_func(s)
         constraints = [
             0 <= s,
             s <= 1,
-            self.cost_func(s) <= self.budget + self.np_cost_func(unit_inclusion_vector), #budget only accounts for additional points
-            s[unit_inclusion_vector] == 1
+            self.cost_func(s) <= self.budget + self.np_cost_func(unit_inclusion_vector),
         ]
+
+        if np.sum(unit_inclusion_vector) >= 1:
+            constraints.append(s[unit_inclusion_vector] == 1)
+
         prob = cp.Problem(cp.Maximize(objective), constraints)
         prob.solve(solver = cp.MOSEK, verbose=False)
 
@@ -159,7 +166,6 @@ class Opt:
         # using only labeled+unlabeled indices, without validation set.
         assert hasattr(self, "cost_func") and self.cost_func is not None, "Need to specify cost function"
 
-        relevant_indices = np.concatenate([self.lSet, self.uSet]).astype(int)
         labeled_set = set(self.lSet)
         np.random.seed(self.seed)
 
@@ -169,13 +175,13 @@ class Opt:
         unit_inclusion_vector = np.zeros(len(self.units), dtype=bool)
 
         unit_to_indices = {
-            u: relevant_indices[self.unit_assignment[relevant_indices] == u]
+            u: self.relevant_indices[self.unit_assignment[self.relevant_indices] == u]
             for u in self.units
-        } if self.cost_domain == "unit" else {u: [relevant_indices[u]] for u in self.units}
+        } if self.cost_domain == "unit" else {u: [self.relevant_indices[u]] for u in self.units}
 
         labeled_units = [
             u for i, u in enumerate(self.units)
-            if np.any([idx in labeled_set for idx in relevant_indices[self.unit_assignment == u]])
+            if np.any([idx in labeled_set for idx in self.relevant_indices[self.unit_assignment == u]])
         ] if self.cost_domain == "unit" else [
             u for u in self.units if u in self.lSet
         ]
@@ -192,7 +198,14 @@ class Opt:
         else:
             assert hasattr(self, "utility_func") and self.utility_func is not None, "Need to specify utility function"
 
-            probs = self.solve_opt()
+            prob_path = os.path.join(self.cfg.EXP_ROOT, "probabilities.pkl")
+
+            if os.path.exists(prob_path):
+                print("Loading probabilities from file...")
+                with open(prob_path, "rb") as f:
+                    probs = dill.load(f)["probs"] #already in the order of relevant indices based on how I saved these files
+            else:
+                probs = self.solve_opt()
             for i in range(len(self.units)):
                 draw = np.random.choice([0, 1], p=[1 - probs[i], probs[i]])
                 unit_inclusion_vector[i] = draw
@@ -226,4 +239,4 @@ class Opt:
         if self.utility_func_type == "random":
             return activeSet, remainSet, self.np_cost_func(unit_inclusion_vector)
         else:
-            return activeSet, remainSet, total_sample_cost, probs, relevant_indices
+            return activeSet, remainSet, total_sample_cost, probs, self.relevant_indices

@@ -4,6 +4,7 @@ from datetime import datetime
 import argparse
 import numpy as np
 import dill
+import json
 
 import torch
 from copy import deepcopy
@@ -178,6 +179,8 @@ def main(cfg):
     else:
         print("Experiment Directory Already Exists: {}. Reusing it may lead to loss of old logs in the directory.\n".format(exp_dir))
     cfg.EXP_DIR = exp_dir
+    cfg.EXP_ROOT = os.path.dirname(exp_dir)
+    cfg.INITIAL_SET_DIR = os.path.join(dataset_out_dir, cfg.INITIAL_SET.STR)
 
     # Save the config file in EXP_DIR
     dump_cfg(cfg)
@@ -212,6 +215,7 @@ def main(cfg):
     model = model_builder.build_model(cfg).cuda() if use_cuda else model_builder.build_model(cfg)
 
     al_iter = 0
+    episode = 0
     if len(lSet) == 0:
         print('Labeled Set is Empty - Sampling an Initial Pool')
         al_obj = ActiveLearning(data_obj, cfg)
@@ -229,6 +233,7 @@ def main(cfg):
         # Add activeSet to lSet, save new_uSet as uSet and update dataloader for the next episode
         lSet = np.append(lSet, activeSet)
         uSet = new_uSet
+        episode = 1
         al_iter += 1
 
     print("Data Partitioning Complete. \nLabeled Set: {}, Unlabeled Set: {}, Validation Set: {}\n".format(len(lSet), len(uSet), len(valSet)))
@@ -256,7 +261,7 @@ def main(cfg):
     print("AL Query Method: {}\nMax AL Episodes: {}\n".format(cfg.ACTIVE_LEARNING.SAMPLING_FN, cfg.ACTIVE_LEARNING.MAX_ITER))
     logger.info("AL Query Method: {}\nMax AL Episodes: {}\n".format(cfg.ACTIVE_LEARNING.SAMPLING_FN, cfg.ACTIVE_LEARNING.MAX_ITER))
 
-    for cur_episode in range(0, cfg.ACTIVE_LEARNING.MAX_ITER+1):
+    for cur_episode in range(episode, cfg.ACTIVE_LEARNING.MAX_ITER+1):
 
         print("======== EPISODE {} BEGINS ========\n".format(cur_episode))
         logger.info("======== EPISODE {} BEGINS ========\n".format(cur_episode))
@@ -284,26 +289,47 @@ def main(cfg):
             print("Test Accuracy: {}.\n".format(round(test_acc, 4)))
             logger.info("EPISODE {} Test Accuracy {}.\n".format(cur_episode, test_acc))
         else:
-            labeled_indices = lSet.tolist()
-            X_train = train_data[labeled_indices][0]
-            y_train = train_data[labeled_indices][1]
+            episode_0_summary = os.path.join(cfg.INITIAL_SET_DIR, "episode_0/summary.json")
+            r2 = None
+            if os.path.exists(episode_0_summary) and cur_episode == 0:
+                print("Loading previous initial set results...")
+                try:
+                    with open(episode_0_summary, "rb") as f:
+                        raw_r2 = json.load(f).get('test_r2', None)
+                        if isinstance(raw_r2, str):
+                            raw_r2 = raw_r2.strip().rstrip('.').strip()
+                        r2 = float(raw_r2)
+                except (ValueError, TypeError, json.JSONDecodeError) as e:
+                    print(f"Warning: Failed to load or parse r2 from {episode_0_summary}: {e}")
+                    r2 = None
+                    
+            if r2 is None:
+                labeled_indices = lSet.tolist()
+                X_train = train_data[labeled_indices][0]
+                y_train = train_data[labeled_indices][1]
 
-            test_indices = np.arange(len(test_data))
-            X_test = test_data[test_indices][0]
-            y_test = test_data[test_indices][1]
+                test_indices = np.arange(len(test_data))
+                X_test = test_data[test_indices][0]
+                y_test = test_data[test_indices][1]
 
-            pipeline = Pipeline([
-                ('scaler', StandardScaler()),     # Step 1: Standardize features
-                ('ridgecv', RidgeCV(alphas=np.logspace(-5,5,10), scoring='r2', cv=KFold(n_splits=5, shuffle=True, random_state=42)))  # Step 2: RidgeCV with 5-fold CV
-            ])
+                pipeline = Pipeline([
+                    ('scaler', StandardScaler()),     # Step 1: Standardize features
+                    ('ridgecv', RidgeCV(alphas=np.logspace(-5,5,10), scoring='r2', cv=KFold(n_splits=5, shuffle=True, random_state=42)))  # Step 2: RidgeCV with 5-fold CV
+                ])
 
-            model = pipeline
-            model.fit(X_train, y_train)
+                model = pipeline
+                model.fit(X_train, y_train)
 
-            best_alpha = model.named_steps['ridgecv'].alpha_
-            print(f"Best alpha: {best_alpha}")
+                best_alpha = model.named_steps['ridgecv'].alpha_
+                print(f"Best alpha: {best_alpha}")
 
-            r2 = model.score(X_test, y_test)
+                r2 = model.score(X_test, y_test)
+
+                if cur_episode == 0:
+                    os.makedirs(os.path.dirname(episode_0_summary), exist_ok=True)
+                    with open(episode_0_summary, "w") as f:
+                        json.dump({'test_r2': r2}, f)
+                    print(f"Saved r2={r2:.4f} to {episode_0_summary}")
 
             print("Test Accuracy: {}.\n".format(round(r2, 4)))
             logger.info("EPISODE {} Test Accuracy {}.\n".format(cur_episode, r2))
@@ -336,7 +362,7 @@ def main(cfg):
                 activeSet, new_uSet, total_cost, probs, relevant_indices = al_obj.sample_from_uSet(model, lSet, uSet)
                 latlons = [train_data[idx][2] for idx in relevant_indices]
                 ids = [train_data[idx][3] for idx in relevant_indices]
-                pkl_file = os.path.join(cfg.EXP_DIR, "probabilities.pkl")
+                pkl_file = os.path.join(cfg.EXP_ROOT, "probabilities.pkl")
                 with open(pkl_file, "wb") as f:
                     dill.dump({"ids": ids, "latlons": latlons, "probs":probs}, f)
         else:

@@ -66,7 +66,7 @@ for LABEL_SHORT in POP TC; do
 
             declare -A COST_CONFIGS=(
                 ["pointwise_by_array_cluster_based"]="--cost_func=pointwise_by_array --cost_name=pointwise_by_array_cluster_based --unit_assignment_path=${UNIT_ASSIGNMENT_PATH} --unit_cost_path=${BASE_DIR}/cost/county_costs_${points_per_cluster}_points_per_cluster.pkl --points_per_unit=${points_per_cluster}"
-                ["unit_aware_pointwise_cost"]="--cost_func=unit_aware_pointwise_cost --unit_assignment_path=${UNIT_ASSIGNMENT_PATH}"
+                #["unit_aware_pointwise_cost"]="--cost_func=unit_aware_pointwise_cost --unit_assignment_path=${UNIT_ASSIGNMENT_PATH}"
                 ["pointwise_by_array_distance_based"]="--cost_func=pointwise_by_array --cost_name=pointwise_by_array_distance_based --cost_array_path=${BASE_DIR}/cost/distance_based_costs_top50_urban.pkl"
             )
 
