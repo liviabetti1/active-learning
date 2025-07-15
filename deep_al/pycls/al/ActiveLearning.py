@@ -2,7 +2,7 @@
 # GitHub: https://github.com/PrateekMunjal
 # ----------------------------------------------------------
 
-from .Sampling import Sampling, CoreSetMIPSampling, AdversarySampler
+from .Sampling import Sampling
 import pycls.utils.logging as lu
 
 logger = lu.get_logger(__name__)

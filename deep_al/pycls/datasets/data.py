@@ -9,13 +9,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from torch.utils.data.sampler import SubsetRandomSampler
 
-from .randaugment import RandAugmentPolicy
-from .simclr_augment import get_simclr_ops
 import pycls.utils.logging as lu
-from pycls.datasets.custom_datasets import CIFAR10, CIFAR100, MNIST, SVHN
-from pycls.datasets.imbalanced_cifar import IMBALANCECIFAR10, IMBALANCECIFAR100
-from pycls.datasets.sampler import IndexedSequentialSampler
-from pycls.datasets.tiny_imagenet import TinyImageNet
 from pycls.datasets.usavars import USAVars
 from pycls.datasets.india_secc import IndiaSECC
 
@@ -50,7 +44,6 @@ class MultiEpochsDataLoader(torch.utils.data.DataLoader):
     def __iter__(self):
         for i in range(len(self)):
             yield next(self.iterator)
-
 
 class Data:
     """
@@ -207,54 +200,8 @@ class Data:
         preprocess_steps = transforms.Compose(preprocess_steps)
 
         only_features = self.cfg.MODEL.LINEAR_FROM_FEATURES
-
-        if self.dataset == "MNIST":
-            mnist = MNIST(save_dir, train=isTrain, transform=preprocess_steps, test_transform=test_preprocess_steps, download=isDownload)
-            return mnist, len(mnist)
-
-        elif self.dataset == "CIFAR10":
-            cifar10 = CIFAR10(save_dir, train=isTrain, transform=preprocess_steps, test_transform=test_preprocess_steps, download=isDownload, only_features=only_features)
-            return cifar10, len(cifar10)
-
-        elif self.dataset == "CIFAR100":
-            cifar100 = CIFAR100(save_dir, train=isTrain, transform=preprocess_steps,  test_transform=test_preprocess_steps, download=isDownload, only_features=only_features)
-            return cifar100, len(cifar100)
-
-        elif self.dataset == "SVHN":
-            if isTrain:
-                svhn = SVHN(save_dir, split='train', transform=preprocess_steps,  test_transform=test_preprocess_steps, download=isDownload)
-            else:
-                svhn = SVHN(save_dir, split='test', transform=preprocess_steps,  test_transform=test_preprocess_steps, download=isDownload)
-            return svhn, len(svhn)
-
-        elif self.dataset == "TINYIMAGENET":
-            if isTrain:
-                # tiny = datasets.ImageFolder(save_dir+'/train', transform=preprocess_steps)
-                tiny = TinyImageNet(save_dir, split='train', transform=preprocess_steps, test_transform=test_preprocess_steps, only_features=only_features)
-            else:
-                # tiny = datasets.ImageFolder(save_dir+'/val', transform=preprocess_steps)
-                tiny = TinyImageNet(save_dir, split='val', transform=preprocess_steps, test_transform=test_preprocess_steps)
-            return tiny, len(tiny)
-        elif self.dataset in ['IMAGENET50', 'IMAGENET100', 'IMAGENET200']:
-            if isTrain:
-                # tiny = datasets.ImageFolder(save_dir+'/train', transform=preprocess_steps)
-                imagenet = ImageNet(save_dir, split='train', transform=preprocess_steps, test_transform=test_preprocess_steps,
-                                      num_classes=self.cfg.MODEL.NUM_CLASSES, only_features=only_features)
-            else:
-                # tiny = datasets.ImageFolder(save_dir+'/val', transform=preprocess_steps)
-                imagenet = ImageNet(save_dir, split='val', transform=preprocess_steps, test_transform=test_preprocess_steps,
-                                      num_classes=self.cfg.MODEL.NUM_CLASSES, only_features=only_features)
-            return imagenet, len(imagenet)
-
-        elif self.dataset == 'IMBALANCED_CIFAR10':
-            im_cifar10 = IMBALANCECIFAR10(save_dir, train=isTrain, transform=preprocess_steps, test_transform=test_preprocess_steps)
-            return im_cifar10, len(im_cifar10)
-
-        elif self.dataset ==  'IMBALANCED_CIFAR100':
-            im_cifar100 = IMBALANCECIFAR100(save_dir, train=isTrain, transform=preprocess_steps, test_transform=test_preprocess_steps)
-            return im_cifar100, len(im_cifar100)
         
-        elif self.dataset == 'USAVARS_POP':
+        if self.dataset == 'USAVARS_POP':
             usavars_pop = USAVars(root='/share/usavars', isTrain=isTrain, label='population')
             return usavars_pop, len(usavars_pop)
         
@@ -694,66 +641,3 @@ class Data:
         setArray = np.array(setArray, dtype=np.ndarray)
         np.save(f'{save_dir}/{setName}.npy', setArray)
         return f'{save_dir}/{setName}.npy'
-
-
-    def getClassWeightsFromDataset(self, dataset, index_set, bs):
-        temp_loader = self.getIndexesDataLoader(indexes=index_set, batch_size=bs, data=dataset)
-        return self.getClassWeights(temp_loader)
-
-
-    def getClassWeights(self, dataloader):
-
-        """
-        INPUT
-        dataloader: dataLoader
-        
-        OUTPUT
-        Returns a tensor of size C where each element at index i represents the weight for class i. 
-        """
-
-        all_labels = []
-        for _,y in dataloader:
-            all_labels.append(y)
-        print("===Computing Imbalanced Weights===")
-        
-        
-        all_labels = np.concatenate(all_labels, axis=0)
-        print(f"all_labels.shape: {all_labels.shape}")
-        classes = np.unique(all_labels)
-        print(f"classes: {classes.shape}")
-        num_classes = len(classes)
-        freq_count = np.zeros(num_classes, dtype=int)
-        for i in classes:
-            freq_count[i] = (all_labels==i).sum()
-        
-        #Normalize
-        freq_count = (1.0*freq_count)/np.sum(freq_count)
-        print(f"=== Sum(freq_count): {np.sum(freq_count)} ===")
-        class_weights = 1./freq_count
-        
-        class_weights = torch.Tensor(class_weights)
-        return class_weights
-
-    def makeBiasedSet(self, data, method, states=None, lat_lower=None, lat_upper=None, lon_left=None, lon_right=None):
-        #TODO
-        #n_data = len(data)
-        #all_idxs = [i for i in range(n_data)]
-        #_, _, latlons, _ = data[all_idxs]
-        #lats = latlons[:, 0]
-        #lons = latlons[:, 1]
-
-        #if states is not None:
-        #   points = [Point(lon, lat) for lat, lon in latlons]
-        #   gdf_points = gpd.GeoDataFrame(
-        #       {'geometry': points},
-        #       crs='EPSG:4326'
-        #   )
-        #   states_gdf = gpd.read_file("country_boundaries/ne_110m_admin_1_states_provinces.shp")
-        #   state_geom = gdf_states[gdf_states['name'].isin(states)].geometry.unary_union
-        #   gdf_points['in_state'] = gdf_points.geometry.apply(lambda x: x.within(state_geom))
-        #   mask = gdf_points['in_state'].apply(lambda x: True if x else False).to_numpy()
-        #else:
-        #   mask = (lats >= lat_lower) & (lats <= lat_upper) & (lons >= lon_left) & (lons <= lon_right)
-
-        #return all_idxs[mask]
-        return

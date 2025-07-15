@@ -50,7 +50,7 @@ for LABEL_SHORT in POP TC; do
     CFG_NAME="RIDGE_${LABEL_SHORT}"
     BASE_DIR="/home/libe2152/deep-al/usavars/${LABEL_LONG}"
     GROUP_PATH_NLCD="${BASE_DIR}/nlcd_assignments/${LABEL_LONG}_NLCD_cluster_assignments_8.pkl"
-    GROUP_PATH_STATE="${BASE_DIR}/region_assignments/states.pkl"
+    GROUP_PATH_STATE="${BASE_DIR}/region_assignments/state.pkl"
 
     SEEDS=(1 42 123 456 789)
     GROUPS=("nlcd" "state")
@@ -63,7 +63,7 @@ for LABEL_SHORT in POP TC; do
             COST_ARGS="--cost_func=uniform --cost_name=uniform"
             METHODS=("poprisk")
         else
-            METHODS=("random" "stratified" "match_population_proportion" "poprisk")
+            METHODS=("random" "stratified" "match_population_proportion")
         fi
 
         for METHOD in "${METHODS[@]}"; do
